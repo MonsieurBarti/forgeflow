@@ -39,7 +39,7 @@ For each task in `tasks_to_verify`, attempt to verify acceptance criteria progra
 
 Resolve the model for the verifier role:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role verifier <project-id>)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role verifier)
 ```
 
 For phases with multiple tasks, spawn a **forge-verifier** agent (with `model` if resolved) to handle

@@ -43,28 +43,36 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" config-clear KEY
 | `update_check` | `true` | Check for updates on session start |
 | `auto_research` | `true` | Auto-run research before planning |
 
-**Model profile keys** (per-role model assignment):
+**Model profile keys** (per-role model assignment, stored in settings files):
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `model.default` | _(none)_ | Default model for all agent roles |
-| `model.researcher` | _(none)_ | Model for researcher agents |
-| `model.planner` | _(none)_ | Model for planner agents |
-| `model.executor` | _(none)_ | Model for executor agents |
-| `model.verifier` | _(none)_ | Model for verifier agents |
-| `model.plan_checker` | _(none)_ | Model for plan-checker agents |
-| `model.roadmapper` | _(none)_ | Model for roadmapper agents |
+| Key | Description |
+|-----|-------------|
+| `models.default` | Default model for all agent roles |
+| `models.researcher` | Model for researcher agents |
+| `models.planner` | Model for planner agents |
+| `models.executor` | Model for executor agents |
+| `models.verifier` | Model for verifier agents |
+| `models.plan_checker` | Model for plan-checker agents |
+| `models.roadmapper` | Model for roadmapper agents |
 
-Per-project overrides use: `model.<project-id>.<role>` (e.g., `model.gsdb-abc.executor`).
+Model config is stored in settings files (not `bd kv`):
+- **Global**: `~/.claude/forge.local.md` (YAML frontmatter)
+- **Per-project**: `.forge/settings.yaml`
 
-Resolution order: project override > global role > `model.default` > Claude Code default.
+Set models via settings commands:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-set global models.researcher claude-opus-4-6
+node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-set project models.executor claude-haiku-4-5-20251001
+```
+
+Resolution order: project `.forge/settings.yaml` > global `forge.local.md` > `models.default` > Claude Code default.
 
 **"show models"**: Show effective model for each role.
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" model-profiles [project-id]
+node "$HOME/.claude/forge/bin/forge-tools.cjs" model-profiles
 ```
 
-Keys are stored with `forge.` prefix in `bd kv` (e.g., `forge.context_warning`).
+Hook/workflow config keys are stored with `forge.` prefix in `bd kv` (e.g., `forge.context_warning`).
 Users can specify keys with or without the prefix.
 
 Format output as a readable table showing current values alongside defaults.

@@ -47,17 +47,34 @@ const SETTINGS_DESCRIPTIONS = {
 
 function parseSimpleYaml(text) {
   const result = {};
+  let currentSection = null;
   for (const line of text.split('\n')) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const indent = line.match(/^(\s*)/)[1].length;
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
     const colonIdx = trimmed.indexOf(':');
     if (colonIdx === -1) continue;
     const key = trimmed.slice(0, colonIdx).trim();
     let val = trimmed.slice(colonIdx + 1).trim();
-    if (val === 'true') val = true;
-    else if (val === 'false') val = false;
-    else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
-    result[key] = val;
+
+    if (indent > 0 && currentSection) {
+      // Nested key under current section
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
+      if (typeof result[currentSection] !== 'object') result[currentSection] = {};
+      result[currentSection][key] = val;
+    } else if (val === '') {
+      // Section header (e.g., "models:")
+      currentSection = key;
+      if (!result[key]) result[key] = {};
+    } else {
+      currentSection = null;
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
+      result[key] = val;
+    }
   }
   return result;
 }
@@ -65,7 +82,14 @@ function parseSimpleYaml(text) {
 function toSimpleYaml(obj) {
   const lines = [];
   for (const [key, val] of Object.entries(obj)) {
-    lines.push(`${key}: ${val}`);
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      lines.push(`${key}:`);
+      for (const [subKey, subVal] of Object.entries(val)) {
+        lines.push(`  ${subKey}: ${subVal}`);
+      }
+    } else {
+      lines.push(`${key}: ${val}`);
+    }
   }
   return lines.join('\n') + '\n';
 }
@@ -756,14 +780,6 @@ const commands = {
         { key: 'forge.context_critical', default: '0.25', description: 'Context critical/block threshold (0-1)' },
         { key: 'forge.update_check', default: 'true', description: 'Enable update check on session start' },
         { key: 'forge.auto_research', default: 'true', description: 'Auto-run research before planning' },
-        { key: 'forge.model.default', default: '(none)', description: 'Default model for all agent roles' },
-        { key: 'forge.model.researcher', default: '(none)', description: 'Model for researcher agents' },
-        { key: 'forge.model.planner', default: '(none)', description: 'Model for planner agents' },
-        { key: 'forge.model.executor', default: '(none)', description: 'Model for executor agents' },
-        { key: 'forge.model.verifier', default: '(none)', description: 'Model for verifier agents' },
-        { key: 'forge.model.plan_checker', default: '(none)', description: 'Model for plan-checker agents' },
-        { key: 'forge.model.roadmapper', default: '(none)', description: 'Model for roadmapper agents' },
-        { key: 'forge.model.<project-id>.<role>', default: '(none)', description: 'Per-project model override for a role' },
       ],
     });
   },
@@ -771,79 +787,84 @@ const commands = {
   /**
    * Resolve the model for a given agent role.
    * Resolution order:
-   *   1. Per-project override: forge.model.<project-id>.<role>
-   *   2. Global role default: forge.model.<role>
-   *   3. Global fallback: forge.model.default
+   *   1. Per-project override: .forge/settings.yaml models.<role>
+   *   2. Global role default: ~/.claude/forge.local.md models.<role>
+   *   3. Global fallback: models.default from either layer
    *   4. null (use Claude Code default)
    *
-   * Usage: forge-tools model-for-role <role> [project-id]
+   * Usage: forge-tools model-for-role <role>
    * Roles: researcher, planner, executor, verifier, plan_checker, roadmapper
    */
   'model-for-role'(args) {
     const role = args[0];
     if (!role) {
-      console.error('Usage: forge-tools model-for-role <role> [project-id]');
+      console.error('Usage: forge-tools model-for-role <role>');
       process.exit(1);
     }
 
-    const projectId = args[1] || null;
+    // Load models from both layers
+    let globalModels = {};
+    try {
+      const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+      const parsed = parseFrontmatter(text);
+      globalModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
+    } catch { /* no global settings */ }
+
+    let projectModels = {};
+    try {
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+      projectModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
+    } catch { /* no project settings */ }
+
     let model = null;
     let source = null;
 
-    // 1. Per-project override
-    if (projectId) {
-      const projValue = bd(`kv get forge.model.${projectId}.${role}`, { allowFail: true });
-      if (projValue) {
-        model = projValue;
-        source = `project:${projectId}`;
-      }
+    // 1. Per-project role override
+    if (projectModels[role]) {
+      model = projectModels[role];
+      source = 'project';
     }
 
     // 2. Global role default
-    if (!model) {
-      const roleValue = bd(`kv get forge.model.${role}`, { allowFail: true });
-      if (roleValue) {
-        model = roleValue;
-        source = 'global:role';
-      }
+    if (!model && globalModels[role]) {
+      model = globalModels[role];
+      source = 'global';
     }
 
-    // 3. Global fallback
-    if (!model) {
-      const defaultValue = bd(`kv get forge.model.default`, { allowFail: true });
-      if (defaultValue) {
-        model = defaultValue;
-        source = 'global:default';
-      }
+    // 3. Fallback: project default, then global default
+    if (!model && projectModels['default']) {
+      model = projectModels['default'];
+      source = 'project:default';
+    }
+    if (!model && globalModels['default']) {
+      model = globalModels['default'];
+      source = 'global:default';
     }
 
-    output({ role, model, source, project_id: projectId });
+    output({ role, model, source });
   },
 
   /**
    * Show all configured model profiles.
-   * Returns global defaults, per-project overrides, and effective models per role.
+   * Reads from ~/.claude/forge.local.md (global) and .forge/settings.yaml (project).
    */
-  'model-profiles'(args) {
-    const projectId = args[0] || null;
+  'model-profiles'() {
     const roles = ['researcher', 'planner', 'executor', 'verifier', 'plan_checker', 'roadmapper'];
 
-    const raw = bd('kv list --json', { allowFail: true });
-    let kvMap = {};
-    if (raw) {
-      try { kvMap = JSON.parse(raw); } catch { /* ignore */ }
-    }
-    // Normalize: bd kv list may return {key:value} object or [{key,value}] array
-    if (Array.isArray(kvMap)) {
-      const obj = {};
-      for (const item of kvMap) obj[item.key] = item.value;
-      kvMap = obj;
-    }
+    let globalModels = {};
+    try {
+      const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+      const parsed = parseFrontmatter(text);
+      globalModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
+    } catch { /* no global settings */ }
 
-    const modelKv = {};
-    for (const [k, v] of Object.entries(kvMap)) {
-      if (k.startsWith('forge.model.')) modelKv[k] = v;
-    }
+    let projectModels = {};
+    try {
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+      projectModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
+    } catch { /* no project settings */ }
 
     // Build effective model per role
     const effective = {};
@@ -851,18 +872,17 @@ const commands = {
       let model = null;
       let source = null;
 
-      if (projectId && modelKv[`forge.model.${projectId}.${role}`]) {
-        model = modelKv[`forge.model.${projectId}.${role}`];
-        source = `project:${projectId}`;
-      }
-
-      if (!model && modelKv[`forge.model.${role}`]) {
-        model = modelKv[`forge.model.${role}`];
-        source = 'global:role';
-      }
-
-      if (!model && modelKv['forge.model.default']) {
-        model = modelKv['forge.model.default'];
+      if (projectModels[role]) {
+        model = projectModels[role];
+        source = 'project';
+      } else if (globalModels[role]) {
+        model = globalModels[role];
+        source = 'global';
+      } else if (projectModels['default']) {
+        model = projectModels['default'];
+        source = 'project:default';
+      } else if (globalModels['default']) {
+        model = globalModels['default'];
         source = 'global:default';
       }
 
@@ -871,8 +891,10 @@ const commands = {
 
     output({
       effective,
-      all_model_config: modelKv,
-      project_id: projectId,
+      global_models: globalModels,
+      project_models: projectModels,
+      global_path: GLOBAL_SETTINGS_PATH,
+      project_path: path.resolve(process.cwd(), PROJECT_SETTINGS_NAME),
       roles,
     });
   },
@@ -1269,15 +1291,30 @@ const commands = {
       process.exit(1);
     }
 
-    if (!(key in SETTINGS_DEFAULTS)) {
+    // Support dotted keys for nested sections (e.g., models.researcher)
+    const dotIdx = key.indexOf('.');
+    const isNested = dotIdx !== -1;
+    const topKey = isNested ? key.slice(0, dotIdx) : key;
+    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+
+    if (!isNested && !(topKey in SETTINGS_DEFAULTS)) {
       console.error(`Unknown setting: ${key}`);
-      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}`);
+      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}, models.<role>`);
       process.exit(1);
     }
 
     let parsedValue = value;
     if (value === 'true') parsedValue = true;
     else if (value === 'false') parsedValue = false;
+
+    function setNestedKey(obj, tKey, sKey, val) {
+      if (sKey) {
+        if (!obj[tKey] || typeof obj[tKey] !== 'object') obj[tKey] = {};
+        obj[tKey][sKey] = val;
+      } else {
+        obj[tKey] = val;
+      }
+    }
 
     if (scope === 'global') {
       let existing = {};
@@ -1288,7 +1325,7 @@ const commands = {
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         if (bodyMatch) body = bodyMatch[1];
       } catch { /* new file */ }
-      existing[key] = parsedValue;
+      setNestedKey(existing, topKey, subKey, parsedValue);
       writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
       output({ ok: true, scope, key, value: parsedValue });
     } else if (scope === 'project') {
@@ -1297,7 +1334,7 @@ const commands = {
       try {
         existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
       } catch { /* new file */ }
-      existing[key] = parsedValue;
+      setNestedKey(existing, topKey, subKey, parsedValue);
       const dir = path.dirname(projectPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(projectPath, toSimpleYaml(existing));
@@ -1320,20 +1357,34 @@ const commands = {
       process.exit(1);
     }
 
+    const dotIdx = key.indexOf('.');
+    const isNested = dotIdx !== -1;
+    const topKey = isNested ? key.slice(0, dotIdx) : key;
+    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+
+    function clearNestedKey(obj, tKey, sKey) {
+      if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
+        delete obj[tKey][sKey];
+        if (Object.keys(obj[tKey]).length === 0) delete obj[tKey];
+      } else {
+        delete obj[tKey];
+      }
+    }
+
     if (scope === 'global') {
       try {
         const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
         const existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         const body = bodyMatch ? bodyMatch[1] : '';
-        delete existing[key];
+        clearNestedKey(existing, topKey, subKey);
         writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
       } catch { /* file doesn't exist, nothing to clear */ }
     } else if (scope === 'project') {
       const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       try {
         const existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-        delete existing[key];
+        clearNestedKey(existing, topKey, subKey);
         fs.writeFileSync(projectPath, toSimpleYaml(existing));
       } catch { /* file doesn't exist */ }
     }

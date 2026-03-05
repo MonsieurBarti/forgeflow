@@ -37,7 +37,7 @@ how to proceed.
 
 Before executing, resolve the model for the executor role:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role executor <project-id>)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role executor)
 ```
 If `model` is non-null in the response, pass it to each Agent call below.
 

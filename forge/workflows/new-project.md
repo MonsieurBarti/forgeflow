@@ -63,7 +63,7 @@ bd label add <req-id> forge:req
 
 Resolve the model for the roadmapper role:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role roadmapper <project-id>)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role roadmapper)
 ```
 
 Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if resolved):
