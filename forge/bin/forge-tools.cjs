@@ -1282,6 +1282,361 @@ const commands = {
   },
 
   /**
+   * Add a new phase to the end of a project's phase list.
+   * Creates the phase epic, wires parent-child and blocks dependencies.
+   * Usage: forge-tools add-phase <project-id> <description>
+   */
+  'add-phase'(args) {
+    const projectId = args[0];
+    const description = args.slice(1).join(' ');
+    if (!projectId || !description) {
+      console.error('Usage: forge-tools add-phase <project-id> <description>');
+      process.exit(1);
+    }
+
+    // Get existing phases
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    // Determine next phase number from titles
+    let maxPhaseNum = 0;
+    for (const phase of phases) {
+      const match = (phase.title || '').match(/^Phase\s+(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxPhaseNum) maxPhaseNum = num;
+      }
+    }
+    const nextNum = maxPhaseNum + 1;
+    const title = `Phase ${nextNum}: ${description}`;
+
+    // Create phase epic
+    const created = bdJson(`create --title="${title}" --description="${description}" --type=epic --priority=1`);
+    if (!created || !created.id) {
+      console.error('Failed to create phase bead');
+      process.exit(1);
+    }
+
+    // Add parent-child link to project
+    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
+    // Add forge:phase label
+    bd(`label add ${created.id} forge:phase`);
+
+    // Wire ordering: new phase depends on the last existing phase
+    if (phases.length > 0) {
+      // Find the last phase (highest number or last in blocks chain)
+      let lastPhase = null;
+      let lastNum = 0;
+      for (const phase of phases) {
+        const match = (phase.title || '').match(/^Phase\s+([\d.]+)/i);
+        if (match) {
+          const num = parseFloat(match[1]);
+          if (num > lastNum) {
+            lastNum = num;
+            lastPhase = phase;
+          }
+        }
+      }
+      if (lastPhase) {
+        bd(`dep add ${created.id} ${lastPhase.id}`);
+      }
+    }
+
+    output({
+      ok: true,
+      phase_id: created.id,
+      phase_number: nextNum,
+      title,
+      description,
+      project_id: projectId,
+      total_phases: phases.length + 1,
+    });
+  },
+
+  /**
+   * Insert a phase after a given phase using decimal numbering.
+   * Usage: forge-tools insert-phase <project-id> <after-phase-number> <description>
+   */
+  'insert-phase'(args) {
+    const projectId = args[0];
+    const afterPhaseArg = args[1];
+    const description = args.slice(2).join(' ');
+    if (!projectId || !afterPhaseArg || !description) {
+      console.error('Usage: forge-tools insert-phase <project-id> <after-phase-number> <description>');
+      process.exit(1);
+    }
+
+    const afterPhaseNum = parseInt(afterPhaseArg, 10);
+    if (isNaN(afterPhaseNum)) {
+      console.error(`Invalid phase number: ${afterPhaseArg}`);
+      process.exit(1);
+    }
+
+    // Get existing phases
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    // Find the target phase
+    let targetPhase = null;
+    for (const phase of phases) {
+      const match = (phase.title || '').match(/^Phase\s+([\d.]+)/i);
+      if (match && parseFloat(match[1]) === afterPhaseNum) {
+        targetPhase = phase;
+        break;
+      }
+    }
+
+    if (!targetPhase) {
+      console.error(`Phase ${afterPhaseNum} not found in project`);
+      process.exit(1);
+    }
+
+    // Find existing decimal phases after this integer to determine next decimal
+    let maxDecimal = 0;
+    for (const phase of phases) {
+      const match = (phase.title || '').match(/^Phase\s+([\d.]+)/i);
+      if (match) {
+        const num = parseFloat(match[1]);
+        if (num > afterPhaseNum && num < afterPhaseNum + 1) {
+          const decPart = Math.round((num - afterPhaseNum) * 10);
+          if (decPart > maxDecimal) maxDecimal = decPart;
+        }
+      }
+    }
+    const nextDecimal = maxDecimal + 1;
+    const phaseNum = `${afterPhaseNum}.${nextDecimal}`;
+    const title = `Phase ${phaseNum}: ${description}`;
+
+    // Create phase epic
+    const created = bdJson(`create --title="${title}" --description="${description}" --type=epic --priority=1`);
+    if (!created || !created.id) {
+      console.error('Failed to create phase bead');
+      process.exit(1);
+    }
+
+    // Add parent-child link and label
+    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
+    bd(`label add ${created.id} forge:phase`);
+
+    // Wire ordering: new phase depends on target phase
+    bd(`dep add ${created.id} ${targetPhase.id}`);
+
+    // Find the next phase (the one that currently depends on the target)
+    // and rewire it to depend on the new phase instead
+    const nextPhaseNum = afterPhaseNum + 1;
+    let nextPhase = null;
+    for (const phase of phases) {
+      const match = (phase.title || '').match(/^Phase\s+([\d.]+)/i);
+      if (match && parseFloat(match[1]) === nextPhaseNum) {
+        nextPhase = phase;
+        break;
+      }
+    }
+
+    if (nextPhase) {
+      // Remove old dependency and add new one
+      bd(`dep remove ${nextPhase.id} ${targetPhase.id}`, { allowFail: true });
+      bd(`dep add ${nextPhase.id} ${created.id}`);
+    }
+
+    output({
+      ok: true,
+      phase_id: created.id,
+      phase_number: phaseNum,
+      after_phase: afterPhaseNum,
+      title,
+      description,
+      project_id: projectId,
+      rewired_next: nextPhase ? { id: nextPhase.id, title: nextPhase.title } : null,
+    });
+  },
+
+  /**
+   * Remove a phase and renumber subsequent phases.
+   * Only allows removing phases that are not in_progress or closed.
+   * Usage: forge-tools remove-phase <project-id> <phase-number> [--force]
+   */
+  'remove-phase'(args) {
+    const projectId = args[0];
+    const phaseNumArg = args[1];
+    const force = args.includes('--force');
+    if (!projectId || !phaseNumArg) {
+      console.error('Usage: forge-tools remove-phase <project-id> <phase-number> [--force]');
+      process.exit(1);
+    }
+
+    const phaseNum = parseFloat(phaseNumArg);
+    if (isNaN(phaseNum)) {
+      console.error(`Invalid phase number: ${phaseNumArg}`);
+      process.exit(1);
+    }
+
+    // Get existing phases
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    // Find the target phase
+    let targetPhase = null;
+    for (const phase of phases) {
+      const match = (phase.title || '').match(/^Phase\s+([\d.]+)/i);
+      if (match && parseFloat(match[1]) === phaseNum) {
+        targetPhase = phase;
+        break;
+      }
+    }
+
+    if (!targetPhase) {
+      console.error(`Phase ${phaseNum} not found in project`);
+      process.exit(1);
+    }
+
+    // Check status
+    if ((targetPhase.status === 'in_progress' || targetPhase.status === 'closed') && !force) {
+      console.error(`Phase ${phaseNum} is ${targetPhase.status}. Use --force to remove anyway.`);
+      process.exit(1);
+    }
+
+    // Check for tasks (children)
+    const phaseChildren = bdJson(`children ${targetPhase.id}`);
+    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    if (tasks.length > 0 && !force) {
+      console.error(`Phase ${phaseNum} has ${tasks.length} tasks. Use --force to remove anyway.`);
+      process.exit(1);
+    }
+
+    // Rewire dependencies: find phases that depended on the target
+    // and make them depend on the target's dependency instead
+    const targetDepsRaw = bd(`dep list ${targetPhase.id} --json`, { allowFail: true });
+    let targetDeps = [];
+    if (targetDepsRaw) {
+      try { targetDeps = JSON.parse(targetDepsRaw); } catch { /* ignore */ }
+    }
+    if (!Array.isArray(targetDeps)) targetDeps = [];
+
+    // Find which phase the target depends on (its predecessor)
+    const predecessorDep = targetDeps.find(d => {
+      const depId = d.dependency_id || d.id || d;
+      const depPhase = phases.find(p => p.id === depId);
+      return depPhase && (depPhase.labels || []).includes('forge:phase');
+    });
+    const predecessorId = predecessorDep ? (predecessorDep.dependency_id || predecessorDep.id || predecessorDep) : null;
+
+    // Find phases that depend on the target (successors)
+    const successors = [];
+    for (const phase of phases) {
+      if (phase.id === targetPhase.id) continue;
+      const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) {
+        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      }
+      if (!Array.isArray(deps)) deps = [];
+      const dependsOnTarget = deps.some(d => {
+        const depId = d.dependency_id || d.id || d;
+        return depId === targetPhase.id;
+      });
+      if (dependsOnTarget) {
+        successors.push(phase);
+      }
+    }
+
+    // Rewire: each successor that depended on target now depends on target's predecessor
+    for (const successor of successors) {
+      bd(`dep remove ${successor.id} ${targetPhase.id}`, { allowFail: true });
+      if (predecessorId) {
+        bd(`dep add ${successor.id} ${predecessorId}`);
+      }
+    }
+
+    // Close the phase bead with removal reason
+    bd(`close ${targetPhase.id} --reason="Removed from roadmap"`);
+
+    // Close any child tasks
+    for (const task of tasks) {
+      bd(`close ${task.id} --reason="Parent phase removed"`, { allowFail: true });
+    }
+
+    // Determine if renumbering is needed (only for integer phases)
+    const isInteger = Number.isInteger(phaseNum);
+    const renumbered = [];
+
+    if (isInteger) {
+      // Find phases with numbers > target that need renumbering
+      const toRenumber = [];
+      for (const phase of phases) {
+        if (phase.id === targetPhase.id) continue;
+        const match = (phase.title || '').match(/^Phase\s+(\d+)(?:\.(\d+))?:\s*(.*)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          const decimal = match[2] ? parseInt(match[2], 10) : null;
+          const rest = match[3];
+          if (num > phaseNum) {
+            toRenumber.push({ phase, num, decimal, rest });
+          }
+        }
+      }
+
+      // Renumber: decrement phase numbers
+      for (const item of toRenumber) {
+        const newNum = item.decimal !== null
+          ? `${item.num - 1}.${item.decimal}`
+          : `${item.num - 1}`;
+        const newTitle = `Phase ${newNum}: ${item.rest}`;
+        bd(`update ${item.phase.id} --title="${newTitle}"`);
+        renumbered.push({ id: item.phase.id, old_title: item.phase.title, new_title: newTitle });
+      }
+    }
+
+    output({
+      ok: true,
+      removed: { id: targetPhase.id, title: targetPhase.title, phase_number: phaseNum },
+      tasks_closed: tasks.length,
+      rewired: {
+        predecessor: predecessorId,
+        successors: successors.map(s => ({ id: s.id, title: s.title })),
+      },
+      renumbered,
+      remaining_phases: phases.length - 1,
+    });
+  },
+
+  /**
+   * List phases with their numbers for phase management commands.
+   * Usage: forge-tools list-phases <project-id>
+   */
+  'list-phases'(args) {
+    const projectId = args[0];
+    if (!projectId) {
+      console.error('Usage: forge-tools list-phases <project-id>');
+      process.exit(1);
+    }
+
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    // Parse and sort by phase number
+    const parsed = phases.map(p => {
+      const match = (p.title || '').match(/^Phase\s+([\d.]+)/i);
+      return {
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        phase_number: match ? parseFloat(match[1]) : 999,
+      };
+    }).sort((a, b) => a.phase_number - b.phase_number);
+
+    output({
+      project_id: projectId,
+      phases: parsed,
+      total: parsed.length,
+    });
+  },
+
+  /**
    * Find the project bead in the current beads database.
    */
   'find-project'() {
