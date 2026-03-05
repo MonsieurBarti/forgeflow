@@ -6,7 +6,7 @@ allowed-tools: Read, Bash
 ---
 
 <objective>
-Save current session context to beads memory for resumption in a future session. Records the active phase, in-progress tasks, recent decisions, and any blockers.
+Save current session context to beads memory for resumption in a future session. Records the active phase, in-progress tasks, and progress snapshot.
 </objective>
 
 <process>
@@ -15,25 +15,18 @@ Save current session context to beads memory for resumption in a future session.
    node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project
    ```
 
-2. Save session state using forge-tools (captures project, phase, in-progress tasks):
+2. Save session state using the structured save command:
    ```bash
-   node "$HOME/.claude/forge/bin/forge-tools.cjs" session-save <project-id> "<brief summary of where things stand>"
+   node "$HOME/.claude/forge/bin/forge-tools.cjs" save-session <project-id>
    ```
 
-   The session-save command automatically:
-   - Identifies the current active phase
-   - Finds all in-progress tasks
-   - Records a timestamped snapshot to `bd remember`
-
-3. If there are important decisions or context not captured in beads, save them:
+3. If the user provided additional context or notes, save those as a decision memory:
    ```bash
-   bd remember "forge:context:<project-id> <key decisions, blockers, or notes>"
+   bd remember "forge:session:notes <user's notes about current state>"
    ```
 
 4. Report what was saved:
-   - Project name and ID
-   - Current phase
-   - Tasks in progress
-   - Any notes saved
-   - How to resume: "Use `/forge:resume` in your next session to pick up where you left off."
+   - Current phase and progress
+   - In-progress tasks
+   - How to resume: `/forge:resume`
 </process>

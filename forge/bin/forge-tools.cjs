@@ -393,116 +393,192 @@ const commands = {
   },
 
   /**
-   * Save session state for forge:pause.
-   * Records active phase, in-progress tasks, and notes to bd remember.
+   * Get comprehensive progress with per-phase task breakdowns for the dashboard.
    */
-  'session-save'(args) {
+  'full-progress'(args) {
     const projectId = args[0];
-    const notes = args.slice(1).join(' ') || '';
-
     if (!projectId) {
-      console.error('Usage: forge-tools session-save <project-id> [notes]');
+      console.error('Usage: forge-tools full-progress <project-bead-id>');
       process.exit(1);
     }
 
-    // Get current project state
     const project = bdJson(`show ${projectId}`);
     const children = bdJson(`children ${projectId}`);
     const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
-    const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
+    const requirements = issues.filter(i =>
+      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
+    );
+    const phases = issues.filter(i =>
+      (i.labels || []).includes('forge:phase')
+    );
 
-    let inProgressTasks = [];
-    if (currentPhase) {
-      const phaseChildren = bdJson(`children ${currentPhase.id}`);
+    // Get task-level detail for each phase
+    const phaseDetails = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
       const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-      inProgressTasks = tasks.filter(t => t.status === 'in_progress');
+
+      phaseDetails.push({
+        id: phase.id,
+        title: phase.title,
+        status: phase.status,
+        tasks_total: tasks.length,
+        tasks_open: tasks.filter(t => t.status === 'open').length,
+        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        tasks_closed: tasks.filter(t => t.status === 'closed').length,
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
+      });
     }
 
-    const timestamp = new Date().toISOString();
-    const state = {
-      project_id: projectId,
-      project_title: project?.title,
-      phase_id: currentPhase?.id || null,
-      phase_title: currentPhase?.title || null,
-      tasks_in_progress: inProgressTasks.map(t => t.id),
-      notes,
-      saved_at: timestamp,
-    };
+    // Check requirement coverage
+    const reqCoverage = [];
+    for (const req of requirements) {
+      const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) {
+        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      }
+      reqCoverage.push({
+        id: req.id,
+        title: req.title,
+        covered: Array.isArray(deps) && deps.length > 0,
+        covering_tasks: Array.isArray(deps) ? deps.length : 0,
+      });
+    }
 
-    // Save as bd memory
-    const memoryKey = `forge:session:${projectId}`;
-    const memoryValue = JSON.stringify(state);
-    bd(`remember ${memoryKey} ${memoryValue}`, { allowFail: true });
+    const totalPhases = phases.length;
+    const completedPhases = phases.filter(p => p.status === 'closed').length;
+    const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
 
-    output(state);
+    // Get recent decisions
+    const memories = bd('memories forge', { allowFail: true });
+
+    output({
+      project: { id: project?.id, title: project?.title, status: project?.status },
+      progress: {
+        phases_total: totalPhases,
+        phases_completed: completedPhases,
+        phases_remaining: totalPhases - completedPhases,
+        percent: totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0,
+      },
+      current_phase: currentPhase ? { id: currentPhase.id, title: currentPhase.title, status: currentPhase.status } : null,
+      phases: phaseDetails,
+      requirements: {
+        total: requirements.length,
+        covered: reqCoverage.filter(r => r.covered).length,
+        uncovered: reqCoverage.filter(r => !r.covered).map(r => ({ id: r.id, title: r.title })),
+        details: reqCoverage,
+      },
+      memories: memories || null,
+    });
   },
 
   /**
-   * Restore session state for forge:resume.
-   * Reads the last saved session state from bd memories.
+   * Save session state for forge:pause.
+   * Captures current phase, in-progress tasks, and notes into bd remember.
    */
-  'session-restore'(args) {
+  'save-session'(args) {
     const projectId = args[0];
-
-    // Try to find memories matching forge:session
-    const raw = bd('memories forge:session', { allowFail: true });
-    if (!raw) {
-      output({ found: false, reason: 'no_session_memories' });
-      return;
+    if (!projectId) {
+      console.error('Usage: forge-tools save-session <project-bead-id>');
+      process.exit(1);
     }
 
-    // Parse memories - bd memories returns text, try to extract JSON from it
-    const lines = raw.split('\n').filter(l => l.trim());
-    let lastState = null;
+    const children = bdJson(`children ${projectId}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
-    for (const line of lines) {
-      // Try to find JSON in the memory value
-      const jsonMatch = line.match(/\{.*\}/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (!projectId || parsed.project_id === projectId) {
-            lastState = parsed;
-          }
-        } catch { /* not JSON, skip */ }
+    const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
+    const completedPhases = phases.filter(p => p.status === 'closed').length;
+
+    // Find in-progress tasks across all phases
+    const inProgressTasks = [];
+    for (const phase of phases) {
+      if (phase.status === 'closed') continue;
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      for (const task of tasks) {
+        if (task.status === 'in_progress') {
+          inProgressTasks.push({ id: task.id, title: task.title, phase: phase.id });
+        }
       }
     }
 
-    if (!lastState) {
-      output({ found: false, reason: 'no_matching_session' });
+    const timestamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    const sessionData = {
+      project_id: projectId,
+      timestamp,
+      current_phase: currentPhase ? currentPhase.id : null,
+      current_phase_title: currentPhase ? currentPhase.title : null,
+      phases_completed: completedPhases,
+      phases_total: phases.length,
+      tasks_in_progress: inProgressTasks,
+    };
+
+    // Save structured session state
+    const memoryKey = `forge:session:state`;
+    const memoryValue = `${timestamp} project=${projectId} phase=${sessionData.current_phase || 'none'} progress=${completedPhases}/${phases.length} in_flight=${inProgressTasks.map(t => t.id).join(',')}`;
+    bd(`remember "${memoryKey} ${memoryValue}"`);
+
+    output({ saved: true, session: sessionData });
+  },
+
+  /**
+   * Load session state for forge:resume.
+   * Retrieves saved session state and current project/phase context.
+   */
+  'load-session'(args) {
+    // Get saved session memories
+    const memories = bd('memories forge:session', { allowFail: true });
+
+    // Find project
+    const projectResult = bd('list --label forge:project --json', { allowFail: true });
+    let project = null;
+    if (projectResult) {
+      try {
+        const data = JSON.parse(projectResult);
+        const issues = Array.isArray(data) ? data : (data.issues || []);
+        if (issues.length > 0) project = issues[0];
+      } catch { /* ignore */ }
+    }
+
+    if (!project) {
+      output({ found: false, memories: memories || null });
       return;
     }
 
-    // Enrich with current status
-    const project = bdJson(`show ${lastState.project_id}`);
-    let currentPhase = null;
-    if (lastState.phase_id) {
-      currentPhase = bdJson(`show ${lastState.phase_id}`);
-    }
+    // Get current state
+    const children = bdJson(`children ${project.id}`);
+    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
 
-    let taskStatuses = [];
-    for (const taskId of (lastState.tasks_in_progress || [])) {
-      const task = bdJson(`show ${taskId}`);
-      if (task) {
-        taskStatuses.push({ id: task.id, title: task.title, status: task.status });
+    // Get in-progress tasks
+    const inProgressTasks = [];
+    if (currentPhase) {
+      const phaseChildren = bdJson(`children ${currentPhase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      for (const task of tasks) {
+        if (task.status === 'in_progress') {
+          inProgressTasks.push({ id: task.id, title: task.title });
+        }
       }
     }
 
     output({
       found: true,
-      saved_state: lastState,
-      current: {
-        project: project ? { id: project.id, title: project.title, status: project.status } : null,
-        phase: currentPhase ? { id: currentPhase.id, title: currentPhase.title, status: currentPhase.status } : null,
-        tasks_in_progress: taskStatuses,
-      },
+      project: { id: project.id, title: project.title, status: project.status },
+      current_phase: currentPhase ? { id: currentPhase.id, title: currentPhase.title, status: currentPhase.status } : null,
+      tasks_in_progress: inProgressTasks,
+      phases_completed: phases.filter(p => p.status === 'closed').length,
+      phases_total: phases.length,
+      memories: memories || null,
     });
   },
 
   /**
-   * Get verification context for a phase: tasks with their acceptance criteria and status.
+   * Get phase tasks with acceptance criteria for verification.
    */
   'verify-phase'(args) {
     const phaseId = args[0];
@@ -515,31 +591,42 @@ const commands = {
     const children = bdJson(`children ${phaseId}`);
     const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
-    const verificationItems = tasks.map(t => ({
-      id: t.id,
-      title: t.title,
-      status: t.status,
-      acceptance_criteria: t.acceptance_criteria || null,
-      has_criteria: !!(t.acceptance_criteria && t.acceptance_criteria.trim()),
-    }));
+    // Enrich tasks with full details (acceptance_criteria, etc.)
+    const enrichedTasks = tasks.map(task => {
+      const full = bdJson(`show ${task.id}`);
+      return {
+        id: task.id,
+        title: task.title || full?.title,
+        status: task.status || full?.status,
+        acceptance_criteria: full?.acceptance_criteria || '',
+        notes: full?.notes || '',
+      };
+    });
 
-    const closedWithCriteria = verificationItems.filter(t => t.status === 'closed' && t.has_criteria);
-    const closedNoCriteria = verificationItems.filter(t => t.status === 'closed' && !t.has_criteria);
-    const notClosed = verificationItems.filter(t => t.status !== 'closed');
+    const closedTasks = enrichedTasks.filter(t => t.status === 'closed');
+    const openTasks = enrichedTasks.filter(t => t.status !== 'closed');
+
+    // Get parent project for requirement coverage check
+    const parentId = phase?.parent || null;
+    let requirements = [];
+    if (parentId) {
+      const projectChildren = bdJson(`children ${parentId}`);
+      const allIssues = Array.isArray(projectChildren)
+        ? projectChildren
+        : (projectChildren?.issues || projectChildren?.children || []);
+      requirements = allIssues.filter(i =>
+        (i.labels || []).includes('forge:req')
+      );
+    }
 
     output({
-      phase_id: phaseId,
-      phase_title: phase?.title,
-      phase_status: phase?.status,
-      tasks: verificationItems,
-      summary: {
-        total: tasks.length,
-        closed_with_criteria: closedWithCriteria.length,
-        closed_no_criteria: closedNoCriteria.length,
-        not_closed: notClosed.length,
-        ready_for_uat: closedWithCriteria.length,
-        needs_completion: notClosed.length,
-      },
+      phase: { id: phase?.id, title: phase?.title, status: phase?.status, parent: parentId },
+      tasks_to_verify: closedTasks,
+      tasks_still_open: openTasks,
+      total_tasks: tasks.length,
+      total_closed: closedTasks.length,
+      total_open: openTasks.length,
+      requirements_count: requirements.length,
     });
   },
 

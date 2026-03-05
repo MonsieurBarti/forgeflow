@@ -14,15 +14,17 @@ a verification report.
 <execution_flow>
 
 <step name="load">
-Load the phase context and all task details:
+Load the phase context and all task details with acceptance criteria:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>
+node "$HOME/.claude/forge/bin/forge-tools.cjs" verify-phase <phase-id>
 ```
-For each closed task, read its full details including acceptance_criteria.
+
+This returns `tasks_to_verify` with pre-loaded acceptance criteria.
+For each task, review its `acceptance_criteria` field.
 </step>
 
 <step name="verify_each">
-For each task, verify its acceptance criteria:
+For each task in `tasks_to_verify`, verify its acceptance criteria:
 
 1. **Code inspection** -- read the relevant code, check it exists and looks correct
 2. **Test execution** -- run any tests that cover this task's functionality
