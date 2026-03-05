@@ -43,6 +43,27 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" config-clear KEY
 | `update_check` | `true` | Check for updates on session start |
 | `auto_research` | `true` | Auto-run research before planning |
 
+**Model profile keys** (per-role model assignment):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `model.default` | _(none)_ | Default model for all agent roles |
+| `model.researcher` | _(none)_ | Model for researcher agents |
+| `model.planner` | _(none)_ | Model for planner agents |
+| `model.executor` | _(none)_ | Model for executor agents |
+| `model.verifier` | _(none)_ | Model for verifier agents |
+| `model.plan_checker` | _(none)_ | Model for plan-checker agents |
+| `model.roadmapper` | _(none)_ | Model for roadmapper agents |
+
+Per-project overrides use: `model.<project-id>.<role>` (e.g., `model.gsdb-abc.executor`).
+
+Resolution order: project override > global role > `model.default` > Claude Code default.
+
+**"show models"**: Show effective model for each role.
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" model-profiles [project-id]
+```
+
 Keys are stored with `forge.` prefix in `bd kv` (e.g., `forge.context_warning`).
 Users can specify keys with or without the prefix.
 

@@ -35,6 +35,12 @@ how to proceed.
 
 ## 3. Execute Waves
 
+Before executing, resolve the model for the executor role:
+```bash
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role executor <project-id>)
+```
+If `model` is non-null in the response, pass it to each Agent call below.
+
 For each wave, in order:
 
 ### Wave N Execution
@@ -47,7 +53,7 @@ For tasks in this wave that are `open` or `in_progress`:
 agents simultaneously in the same response:
 
 ```
-Agent(subagent_type="forge-executor", prompt="
+Agent(subagent_type="forge-executor", model="<resolved model or omit if null>", prompt="
 Execute this task:
 
 Task: <task title> (<task-id>)

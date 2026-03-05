@@ -665,19 +665,20 @@ const commands = {
    */
   'config-list'() {
     const raw = bd('kv list --json', { allowFail: true });
-    let allKv = [];
+    let kvMap = {};
     if (raw) {
-      try {
-        allKv = JSON.parse(raw);
-      } catch {
-        // Try line-by-line format
-        allKv = [];
-      }
+      try { kvMap = JSON.parse(raw); } catch { /* ignore */ }
     }
-    // Filter to forge.* keys
-    const forgeKv = (Array.isArray(allKv) ? allKv : []).filter(
-      kv => (kv.key || '').startsWith('forge.')
-    );
+    // Normalize: bd kv list may return {key:value} object or [{key,value}] array
+    if (Array.isArray(kvMap)) {
+      const obj = {};
+      for (const item of kvMap) obj[item.key] = item.value;
+      kvMap = obj;
+    }
+    // Filter to forge.* keys and convert to array format
+    const forgeKv = Object.entries(kvMap)
+      .filter(([k]) => k.startsWith('forge.'))
+      .map(([key, value]) => ({ key, value }));
     output({
       config: forgeKv,
       available_keys: [
@@ -685,7 +686,124 @@ const commands = {
         { key: 'forge.context_critical', default: '0.25', description: 'Context critical/block threshold (0-1)' },
         { key: 'forge.update_check', default: 'true', description: 'Enable update check on session start' },
         { key: 'forge.auto_research', default: 'true', description: 'Auto-run research before planning' },
+        { key: 'forge.model.default', default: '(none)', description: 'Default model for all agent roles' },
+        { key: 'forge.model.researcher', default: '(none)', description: 'Model for researcher agents' },
+        { key: 'forge.model.planner', default: '(none)', description: 'Model for planner agents' },
+        { key: 'forge.model.executor', default: '(none)', description: 'Model for executor agents' },
+        { key: 'forge.model.verifier', default: '(none)', description: 'Model for verifier agents' },
+        { key: 'forge.model.plan_checker', default: '(none)', description: 'Model for plan-checker agents' },
+        { key: 'forge.model.roadmapper', default: '(none)', description: 'Model for roadmapper agents' },
+        { key: 'forge.model.<project-id>.<role>', default: '(none)', description: 'Per-project model override for a role' },
       ],
+    });
+  },
+
+  /**
+   * Resolve the model for a given agent role.
+   * Resolution order:
+   *   1. Per-project override: forge.model.<project-id>.<role>
+   *   2. Global role default: forge.model.<role>
+   *   3. Global fallback: forge.model.default
+   *   4. null (use Claude Code default)
+   *
+   * Usage: forge-tools model-for-role <role> [project-id]
+   * Roles: researcher, planner, executor, verifier, plan_checker, roadmapper
+   */
+  'model-for-role'(args) {
+    const role = args[0];
+    if (!role) {
+      console.error('Usage: forge-tools model-for-role <role> [project-id]');
+      process.exit(1);
+    }
+
+    const projectId = args[1] || null;
+    let model = null;
+    let source = null;
+
+    // 1. Per-project override
+    if (projectId) {
+      const projValue = bd(`kv get forge.model.${projectId}.${role}`, { allowFail: true });
+      if (projValue) {
+        model = projValue;
+        source = `project:${projectId}`;
+      }
+    }
+
+    // 2. Global role default
+    if (!model) {
+      const roleValue = bd(`kv get forge.model.${role}`, { allowFail: true });
+      if (roleValue) {
+        model = roleValue;
+        source = 'global:role';
+      }
+    }
+
+    // 3. Global fallback
+    if (!model) {
+      const defaultValue = bd(`kv get forge.model.default`, { allowFail: true });
+      if (defaultValue) {
+        model = defaultValue;
+        source = 'global:default';
+      }
+    }
+
+    output({ role, model, source, project_id: projectId });
+  },
+
+  /**
+   * Show all configured model profiles.
+   * Returns global defaults, per-project overrides, and effective models per role.
+   */
+  'model-profiles'(args) {
+    const projectId = args[0] || null;
+    const roles = ['researcher', 'planner', 'executor', 'verifier', 'plan_checker', 'roadmapper'];
+
+    const raw = bd('kv list --json', { allowFail: true });
+    let kvMap = {};
+    if (raw) {
+      try { kvMap = JSON.parse(raw); } catch { /* ignore */ }
+    }
+    // Normalize: bd kv list may return {key:value} object or [{key,value}] array
+    if (Array.isArray(kvMap)) {
+      const obj = {};
+      for (const item of kvMap) obj[item.key] = item.value;
+      kvMap = obj;
+    }
+
+    const modelKv = {};
+    for (const [k, v] of Object.entries(kvMap)) {
+      if (k.startsWith('forge.model.')) modelKv[k] = v;
+    }
+
+    // Build effective model per role
+    const effective = {};
+    for (const role of roles) {
+      let model = null;
+      let source = null;
+
+      if (projectId && modelKv[`forge.model.${projectId}.${role}`]) {
+        model = modelKv[`forge.model.${projectId}.${role}`];
+        source = `project:${projectId}`;
+      }
+
+      if (!model && modelKv[`forge.model.${role}`]) {
+        model = modelKv[`forge.model.${role}`];
+        source = 'global:role';
+      }
+
+      if (!model && modelKv['forge.model.default']) {
+        model = modelKv['forge.model.default'];
+        source = 'global:default';
+      }
+
+      effective[role] = { model, source };
+    }
+
+    output({
+      effective,
+      all_model_config: modelKv,
+      project_id: projectId,
+      roles,
     });
   },
 
