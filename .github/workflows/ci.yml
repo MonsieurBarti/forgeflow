@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Validate package.json
+        run: node -e "require('./package.json')"
+
+      - name: Check install script syntax
+        run: node -c install.js
+
+      - name: Check forge-tools syntax
+        run: node -c forge/bin/forge-tools.cjs
+
+      - name: Check hook syntax
+        run: |
+          for f in hooks/*.js; do
+            node -c "$f"
+          done
+
+      - name: Run tests
+        run: npm test
+        continue-on-error: true

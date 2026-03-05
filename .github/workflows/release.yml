@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag matches package.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$PKG_VERSION" != "$TAG" ]; then
+            echo "Tag $TAG does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Create tarball
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          tar czf "dist/forge-cc-${TAG}.tar.gz" \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.beads' \
+            --exclude='.claude' \
+            --exclude='.runtime' \
+            --exclude='.logs' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            .
+
+      - name: Compute SHA256
+        id: sha
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          SHA=$(shasum -a 256 "dist/forge-cc-${TAG}.tar.gz" | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/forge-cc-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Homebrew formula
+        if: "!contains(github.ref_name, '-')"
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ steps.sha.outputs.sha256 }}
+          REPO: ${{ github.repository }}
+        run: |
+          URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+
+          mkdir -p Formula
+          cat > Formula/forge-cc.rb <<RUBY
+          class ForgeCc < Formula
+            desc "GSD-style project orchestration for Claude Code, backed by beads"
+            homepage "https://github.com/${REPO}"
+            url "${URL}"
+            sha256 "${SHA}"
+            license "MIT"
+
+            depends_on "node"
+
+            def install
+              libexec.install Dir["*"]
+              bin.write_exec_script libexec/"install.js"
+            end
+
+            def caveats
+              <<~EOS
+                Run the installer to set up Forge in Claude Code:
+                  node #{libexec}/install.js
+              EOS
+            end
+
+            test do
+              assert_match "Forge", shell_output("node #{libexec}/install.js --help 2>&1", 1)
+            end
+          end
+          RUBY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/forge-cc.rb
+          git diff --cached --quiet || git commit -m "brew: update forge-cc to ${TAG}"
+          git push origin HEAD:main || true

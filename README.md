@@ -8,33 +8,57 @@ Instead of managing state through markdown planning files, Forge uses beads as i
 
 - [Claude Code](https://claude.ai/claude-code) installed
 - [beads](https://github.com/steveyegge/beads) (`bd`) installed and configured
+- Node.js 18+
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
 ```bash
+brew tap MonsieurBarti/get-shit-done-beads
+brew install forge-cc
+node "$(brew --prefix)/libexec/install.js"
+```
+
+### npm (any platform)
+
+```bash
+npx forge-cc
+```
+
+### Manual
+
+```bash
+git clone https://github.com/MonsieurBarti/get-shit-done-beads.git
+cd get-shit-done-beads
 node install.js
 ```
 
-Or manually copy into `~/.claude/`:
-
-```bash
-cp -r commands/forge ~/.claude/commands/forge
-cp -r forge ~/.claude/forge
-cp -r agents ~/.claude/agents/
-cp hooks/* ~/.claude/hooks/
-```
+The installer copies commands, agents, workflows, and hooks into `~/.claude/` and registers hooks in `settings.json`.
 
 ## Usage
 
+All commands are available as Claude Code slash commands:
+
+| Command | Description |
+|---------|-------------|
+| `/forge:new` | Initialize a new project with vision, requirements, and phased roadmap |
+| `/forge:plan [phase]` | Plan a phase -- research approach and create task beads with acceptance criteria |
+| `/forge:execute [phase]` | Execute tasks in a phase with wave-based parallelization |
+| `/forge:verify [phase]` | Verify phase completion against acceptance criteria |
+| `/forge:progress` | Show project progress dashboard from bead graph |
+| `/forge:config` | View or modify configuration |
+| `/forge:pause` | Save session context for later resumption |
+| `/forge:resume` | Restore session context from previous pause |
+
+### Typical workflow
+
 ```
-/forge:new              # Initialize a new project
-/forge:plan [phase]     # Plan a phase (research + task creation)
-/forge:execute [phase]  # Execute tasks in a phase
-/forge:verify [phase]   # UAT against acceptance criteria
-/forge:progress         # Status dashboard from bead graph
-/forge:config           # View or modify configuration
-/forge:pause            # Save session context
-/forge:resume           # Restore session context
+/forge:new              # Define project, generate requirements and roadmap
+/forge:plan 1           # Research and plan Phase 1
+/forge:execute 1        # Build Phase 1 (parallelized task execution)
+/forge:verify 1         # UAT against acceptance criteria
+/forge:progress         # Check overall status, move to next phase
 ```
 
 ## How It Works
@@ -57,12 +81,38 @@ commands/forge/         # Slash command definitions (thin wrappers)
 forge/
   bin/forge-tools.cjs   # Helper CLI for querying beads context
   workflows/            # Orchestration logic (prompt engineering)
-  templates/            # Prompt templates for agents
   references/           # Convention docs and examples
-agents/                 # Subagent definitions
-hooks/                  # Context monitor, statusline
+agents/                 # Subagent definitions (planner, executor, verifier, etc.)
+hooks/                  # Context monitor, statusline, update checker
 install.js              # Installer
 ```
+
+### Agents
+
+Forge uses specialized subagents for different workflow stages:
+
+- **forge-researcher** -- Investigates codebase and gathers context for planning
+- **forge-planner** -- Creates detailed task breakdowns with acceptance criteria
+- **forge-plan-checker** -- Validates plans against requirements
+- **forge-roadmapper** -- Generates phased project roadmaps
+- **forge-executor** -- Executes individual tasks within a phase
+- **forge-verifier** -- Runs UAT verification against acceptance criteria
+
+### Hooks
+
+- **forge-context-monitor** (PostToolUse) -- Tracks active project context
+- **forge-statusline** -- Displays current phase/task in the status bar
+- **forge-update-check** (SessionStart) -- Checks for new Forge versions
+
+## Releasing
+
+Releases are automated via GitHub Actions:
+
+1. Update `version` in `package.json`
+2. Commit and tag: `git tag v0.2.0`
+3. Push: `git push origin v0.2.0`
+
+The release workflow creates a GitHub Release with a tarball and auto-updates the Homebrew formula.
 
 ## License
 

@@ -142,6 +142,19 @@ function registerHooks() {
 }
 
 function main() {
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('Forge - GSD-style project orchestration for Claude Code');
+    console.log('');
+    console.log('Usage: node install.js');
+    console.log('');
+    console.log('Installs Forge commands, agents, workflows, and hooks into ~/.claude/');
+    console.log('');
+    console.log('Prerequisites:');
+    console.log('  - Claude Code (https://claude.ai/claude-code)');
+    console.log('  - beads (https://github.com/steveyegge/beads)');
+    process.exit(0);
+  }
+
   console.log('');
   console.log('  Forge - Project orchestration backed by beads');
   console.log('  =============================================');
