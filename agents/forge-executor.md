@@ -51,8 +51,7 @@ Create an atomic git commit:
 git add <specific files>
 git commit -m "<descriptive message>
 
-Task: <task-id>
-Co-Authored-By: Claude <noreply@anthropic.com>"
+Task: <task-id>"
 ```
 Stage specific files, not `git add .`.
 </step>

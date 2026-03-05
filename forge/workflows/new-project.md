@@ -15,9 +15,9 @@ If a project already exists, show it and ask if the user wants to create a new o
 
 ## 2. Gather Project Vision
 
-If `--auto @file` was provided, read the file for context. Otherwise, ask the user:
+**Auto mode** (`--auto @file`): Read the referenced file for context. Extract answers to the questions below from the document. If any are unclear, ask only about those gaps.
 
-Use AskUserQuestion to ask these questions one at a time (adapt based on answers):
+**Interactive mode** (default): Use AskUserQuestion to ask these questions one at a time. Adapt follow-up questions based on answers:
 
 1. **What are you building?** (one sentence)
 2. **Who is it for?** (target users/audience)
@@ -29,7 +29,7 @@ Use AskUserQuestion to ask these questions one at a time (adapt based on answers
 
 ```bash
 bd create --title="<project name>" \
-  --description="<vision from answers above>" \
+  --description="<vision synthesized from answers above>" \
   --design="<scope and constraints>" \
   --type=epic --priority=1 --json
 ```
@@ -47,13 +47,13 @@ bd remember "forge:project:<id>:vision <one-line vision>"
 ## 4. Define Requirements
 
 Based on the user's v1 description, break it down into 5-12 concrete requirements.
-Present them to the user for review before creating.
 
-For each requirement:
+Present the full list to the user for review before creating any beads. Let them add, remove, or modify requirements. Iterate until they approve.
+
+For each approved requirement:
 ```bash
 bd create --title="<requirement title>" \
-  --description="<what this requirement means>" \
-  --acceptance_criteria="<how to know it's done>" \
+  --description="<what this requirement means and why it matters>" \
   --type=feature --priority=<1-3> --json
 bd dep add <req-id> <project-id> --type=parent-child
 bd label add <req-id> forge:req
@@ -61,22 +61,25 @@ bd label add <req-id> forge:req
 
 ## 5. Create Phased Roadmap
 
-Analyze the requirements and create 3-8 phases (ordered by dependency and complexity).
-Each phase should have a clear goal and map to specific requirements.
+Use the Agent tool to spawn **forge-roadmapper** with:
+- The project ID and vision
+- All requirement IDs with their titles and descriptions
+- Any user-specified constraints on ordering
 
-Present the proposed phases to the user for review.
+The roadmapper will analyze requirements and propose 3-8 phases.
 
-For each phase:
+Present the proposed phases to the user for review. Let them reorder, merge, split, or rename phases. Iterate until they approve.
+
+Then create the approved phases:
 ```bash
+# For each phase:
 bd create --title="Phase N: <phase name>" \
   --description="<phase goal and what it achieves>" \
   --type=epic --priority=1 --json
 bd dep add <phase-id> <project-id> --type=parent-child
 bd label add <phase-id> forge:phase
-```
 
-Wire up phase ordering (each phase blocks the next):
-```bash
+# Wire phase ordering (each phase blocks the next):
 bd dep add <phase-2-id> <phase-1-id>  # phase 2 depends on phase 1
 bd dep add <phase-3-id> <phase-2-id>  # phase 3 depends on phase 2
 # etc.
@@ -90,10 +93,11 @@ bd dep tree <project-id>
 ```
 
 Summarize:
-- Project vision
+- Project vision (one sentence)
 - N requirements defined
 - N phases planned
-- Next step: `/forge:plan 1` to plan the first phase
+- Phase overview (numbered list with titles)
+- Next step: `/forge:plan` to plan the first phase
 
 Save project ID for future reference:
 ```bash

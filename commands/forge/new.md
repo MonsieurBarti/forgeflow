@@ -15,4 +15,7 @@ Read the Forge conventions: @~/.claude/forge/references/conventions.md
 
 <execution_context>
 Execute the new-project workflow from @~/.claude/forge/workflows/new-project.md end-to-end.
+
+When creating the phased roadmap (step 5), use the Agent tool to spawn the **forge-roadmapper** agent.
+Pass it the project ID, vision, and all requirement details so it can propose an optimal phase ordering.
 </execution_context>
