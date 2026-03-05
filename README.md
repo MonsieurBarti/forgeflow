@@ -50,6 +50,7 @@ All commands are available as Claude Code slash commands:
 | `/forge:config` | View or modify configuration |
 | `/forge:pause` | Save session context for later resumption |
 | `/forge:resume` | Restore session context from previous pause |
+| `/forge:help` | Show available commands and usage guide |
 
 ### Typical workflow
 
