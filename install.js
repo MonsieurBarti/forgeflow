@@ -98,12 +98,16 @@ function registerHooks() {
   if (!settings.hooks.PostToolUse) settings.hooks.PostToolUse = [];
 
   const hasContextMonitor = settings.hooks.PostToolUse.some(
-    h => h.command && h.command.includes('forge-context-monitor')
+    h => (h.hooks || []).some(hk => hk.command && hk.command.includes('forge-context-monitor'))
   );
   if (!hasContextMonitor) {
     settings.hooks.PostToolUse.push({
-      command: `node "${contextMonitorPath}"`,
-      event: 'PostToolUse',
+      hooks: [
+        {
+          type: 'command',
+          command: `node "${contextMonitorPath}"`,
+        },
+      ],
     });
     console.log('  Registered PostToolUse hook: forge-context-monitor');
   }
