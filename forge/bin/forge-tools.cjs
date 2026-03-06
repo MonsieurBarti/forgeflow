@@ -43,6 +43,36 @@ const SETTINGS_DESCRIPTIONS = {
   parallel_execution: 'Execute independent tasks in parallel',
 };
 
+// --- Model Profile Table ---
+// Three tiers mapping agents to model classes.
+// 'opus' resolves to 'inherit' at output (avoids version conflicts).
+// See forge/references/model-profiles.md for rationale.
+
+const MODEL_PROFILES = {
+  'forge-planner':        { quality: 'opus',   balanced: 'opus',   budget: 'sonnet' },
+  'forge-roadmapper':     { quality: 'opus',   balanced: 'sonnet', budget: 'sonnet' },
+  'forge-executor':       { quality: 'opus',   balanced: 'sonnet', budget: 'sonnet' },
+  'forge-researcher':     { quality: 'opus',   balanced: 'sonnet', budget: 'haiku' },
+  'forge-verifier':       { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-plan-checker':   { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-debugger':       { quality: 'opus',   balanced: 'sonnet', budget: 'sonnet' },
+  'forge-codebase-mapper':{ quality: 'sonnet', balanced: 'haiku',  budget: 'haiku' },
+};
+
+// Map old role names to new agent names for backwards compatibility
+const ROLE_TO_AGENT = {
+  planner: 'forge-planner',
+  roadmapper: 'forge-roadmapper',
+  executor: 'forge-executor',
+  researcher: 'forge-researcher',
+  verifier: 'forge-verifier',
+  plan_checker: 'forge-plan-checker',
+  debugger: 'forge-debugger',
+  codebase_mapper: 'forge-codebase-mapper',
+};
+
+const DEFAULT_MODEL_PROFILE = 'balanced';
+
 // --- Simple YAML Helpers ---
 
 function parseSimpleYaml(text) {
@@ -138,6 +168,95 @@ function bdJson(args) {
 
 function output(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+}
+
+// --- Model Resolution ---
+
+/**
+ * Load the active model profile name from settings layers.
+ * Resolution: project model_profile > global model_profile > 'balanced'
+ */
+function loadModelProfile() {
+  let profile = null;
+
+  // Global layer
+  try {
+    const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+    const parsed = parseFrontmatter(text);
+    if (parsed.model_profile) profile = parsed.model_profile;
+  } catch { /* no global settings */ }
+
+  // Project layer (overrides global)
+  try {
+    const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+    const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+    if (parsed.model_profile) profile = parsed.model_profile;
+  } catch { /* no project settings */ }
+
+  // Validate
+  if (profile && !['quality', 'balanced', 'budget'].includes(profile)) {
+    console.error(`Warning: unknown model_profile "${profile}", using "balanced"`);
+    profile = null;
+  }
+
+  return profile || DEFAULT_MODEL_PROFILE;
+}
+
+/**
+ * Load model_overrides from settings layers.
+ * Returns merged map: { 'forge-planner': 'haiku', ... }
+ */
+function loadModelOverrides() {
+  let overrides = {};
+
+  // Global layer
+  try {
+    const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+    const parsed = parseFrontmatter(text);
+    if (parsed.model_overrides && typeof parsed.model_overrides === 'object') {
+      overrides = { ...parsed.model_overrides };
+    }
+  } catch { /* no global settings */ }
+
+  // Project layer (overrides global per-key)
+  try {
+    const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+    const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
+    if (parsed.model_overrides && typeof parsed.model_overrides === 'object') {
+      overrides = { ...overrides, ...parsed.model_overrides };
+    }
+  } catch { /* no project settings */ }
+
+  return overrides;
+}
+
+/**
+ * Resolve the effective model for an agent name.
+ * Returns { model, source } where model is 'inherit'|'sonnet'|'haiku'|null
+ */
+function resolveAgentModel(agentName) {
+  // Normalize: accept both 'planner' and 'forge-planner'
+  const normalized = ROLE_TO_AGENT[agentName] || agentName;
+
+  // 1. Check per-agent overrides
+  const overrides = loadModelOverrides();
+  if (overrides[normalized]) {
+    const raw = overrides[normalized];
+    return { model: raw === 'opus' ? 'inherit' : raw, source: 'override' };
+  }
+
+  // 2. Look up in profile table
+  const profileEntry = MODEL_PROFILES[normalized];
+  if (!profileEntry) {
+    return { model: null, source: null };
+  }
+
+  const profile = loadModelProfile();
+  const raw = profileEntry[profile];
+  return {
+    model: raw === 'opus' ? 'inherit' : raw,
+    source: `profile:${profile}`,
+  };
 }
 
 // --- Commands ---
@@ -785,15 +904,39 @@ const commands = {
   },
 
   /**
-   * Resolve the model for a given agent role.
+   * Resolve the model for a given agent.
    * Resolution order:
-   *   1. Per-project override: .forge/settings.yaml models.<role>
-   *   2. Global role default: ~/.claude/forge.local.md models.<role>
-   *   3. Global fallback: models.default from either layer
-   *   4. null (use Claude Code default)
+   *   1. Per-agent override from model_overrides in settings
+   *   2. Profile table lookup (model_profile setting, default: balanced)
+   *   3. null (agent not in profile table and no override)
    *
-   * Usage: forge-tools model-for-role <role>
-   * Roles: researcher, planner, executor, verifier, plan_checker, roadmapper
+   * Opus-tier agents resolve to 'inherit' (use session default).
+   *
+   * Usage: forge-tools resolve-model <agent-name> [--raw]
+   * Agents: forge-planner, forge-executor, forge-researcher, forge-verifier,
+   *         forge-plan-checker, forge-roadmapper, forge-debugger, forge-codebase-mapper
+   * Also accepts short names: planner, executor, researcher, etc.
+   * --raw: output just the model string (no JSON wrapper)
+   */
+  'resolve-model'(args) {
+    const rawFlag = args.includes('--raw');
+    const agent = args.filter(a => a !== '--raw')[0];
+    if (!agent) {
+      console.error('Usage: forge-tools resolve-model <agent-name> [--raw]');
+      process.exit(1);
+    }
+
+    const result = resolveAgentModel(agent);
+
+    if (rawFlag) {
+      process.stdout.write(result.model || '');
+    } else {
+      output({ agent: ROLE_TO_AGENT[agent] || agent, ...result, profile: loadModelProfile() });
+    }
+  },
+
+  /**
+   * Backwards-compatible alias for resolve-model.
    */
   'model-for-role'(args) {
     const role = args[0];
@@ -802,100 +945,31 @@ const commands = {
       process.exit(1);
     }
 
-    // Load models from both layers
-    let globalModels = {};
-    try {
-      const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const parsed = parseFrontmatter(text);
-      globalModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no global settings */ }
-
-    let projectModels = {};
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      projectModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no project settings */ }
-
-    let model = null;
-    let source = null;
-
-    // 1. Per-project role override
-    if (projectModels[role]) {
-      model = projectModels[role];
-      source = 'project';
-    }
-
-    // 2. Global role default
-    if (!model && globalModels[role]) {
-      model = globalModels[role];
-      source = 'global';
-    }
-
-    // 3. Fallback: project default, then global default
-    if (!model && projectModels['default']) {
-      model = projectModels['default'];
-      source = 'project:default';
-    }
-    if (!model && globalModels['default']) {
-      model = globalModels['default'];
-      source = 'global:default';
-    }
-
-    output({ role, model, source });
+    const result = resolveAgentModel(role);
+    output({ role, model: result.model, source: result.source });
   },
 
   /**
-   * Show all configured model profiles.
-   * Reads from ~/.claude/forge.local.md (global) and .forge/settings.yaml (project).
+   * Show all agent model assignments for the active profile.
+   * Includes overrides and profile table lookup.
    */
   'model-profiles'() {
-    const roles = ['researcher', 'planner', 'executor', 'verifier', 'plan_checker', 'roadmapper'];
+    const profile = loadModelProfile();
+    const overrides = loadModelOverrides();
+    const agents = Object.keys(MODEL_PROFILES);
 
-    let globalModels = {};
-    try {
-      const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const parsed = parseFrontmatter(text);
-      globalModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no global settings */ }
-
-    let projectModels = {};
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      projectModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no project settings */ }
-
-    // Build effective model per role
     const effective = {};
-    for (const role of roles) {
-      let model = null;
-      let source = null;
-
-      if (projectModels[role]) {
-        model = projectModels[role];
-        source = 'project';
-      } else if (globalModels[role]) {
-        model = globalModels[role];
-        source = 'global';
-      } else if (projectModels['default']) {
-        model = projectModels['default'];
-        source = 'project:default';
-      } else if (globalModels['default']) {
-        model = globalModels['default'];
-        source = 'global:default';
-      }
-
-      effective[role] = { model, source };
+    for (const agent of agents) {
+      const result = resolveAgentModel(agent);
+      effective[agent] = result;
     }
 
     output({
+      profile,
+      overrides,
       effective,
-      global_models: globalModels,
-      project_models: projectModels,
-      global_path: GLOBAL_SETTINGS_PATH,
-      project_path: path.resolve(process.cwd(), PROJECT_SETTINGS_NAME),
-      roles,
+      agents,
+      available_profiles: ['quality', 'balanced', 'budget'],
     });
   },
 
@@ -1297,9 +1371,10 @@ const commands = {
     const topKey = isNested ? key.slice(0, dotIdx) : key;
     const subKey = isNested ? key.slice(dotIdx + 1) : null;
 
-    if (!isNested && !(topKey in SETTINGS_DEFAULTS)) {
+    const EXTRA_TOP_KEYS = ['model_profile', 'model_overrides'];
+    if (!isNested && !(topKey in SETTINGS_DEFAULTS) && !EXTRA_TOP_KEYS.includes(topKey)) {
       console.error(`Unknown setting: ${key}`);
-      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}, models.<role>`);
+      console.error(`Available: ${Object.keys(SETTINGS_DEFAULTS).join(', ')}, model_profile, model_overrides.<agent>, models.<role>`);
       process.exit(1);
     }
 
@@ -1826,34 +1901,12 @@ const commands = {
       } catch { /* parse error */ }
     }
 
-    // 2. Resolve models for all quick-relevant roles
-    let globalModels = {};
-    try {
-      const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const parsed = parseFrontmatter(text);
-      globalModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no global settings */ }
-
-    let projectModels = {};
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const parsed = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      projectModels = (parsed.models && typeof parsed.models === 'object') ? parsed.models : {};
-    } catch { /* no project settings */ }
-
-    function resolveModel(role) {
-      if (projectModels[role]) return { model: projectModels[role], source: 'project' };
-      if (globalModels[role]) return { model: globalModels[role], source: 'global' };
-      if (projectModels['default']) return { model: projectModels['default'], source: 'project:default' };
-      if (globalModels['default']) return { model: globalModels['default'], source: 'global:default' };
-      return { model: null, source: null };
-    }
-
+    // 2. Resolve models for all quick-relevant roles via profile system
     const models = {
-      planner: resolveModel('planner'),
-      executor: resolveModel('executor'),
-      plan_checker: resolveModel('plan_checker'),
-      verifier: resolveModel('verifier'),
+      planner: resolveAgentModel('forge-planner'),
+      executor: resolveAgentModel('forge-executor'),
+      plan_checker: resolveAgentModel('forge-plan-checker'),
+      verifier: resolveAgentModel('forge-verifier'),
     };
 
     // 3. Load merged settings
