@@ -62,6 +62,14 @@ Verify phase completion against acceptance criteria.
 - Presents UAT results for user confirmation
 - Closes verified tasks and updates phase status
 
+**`/forge:validate-phase [phase-number]`**
+Retroactively audit and fill validation gaps for a completed phase.
+
+- Checks acceptance criteria were actually met (not just tasks closed)
+- Identifies gaps between what was promised and what was delivered
+- Classifies criteria as COVERED/PARTIAL/MISSING
+- Optionally generates missing tests via forge-verifier agents
+
 ### Quick Mode
 
 **`/forge:quick [--full] [--discuss] <task description>`**
@@ -204,6 +212,11 @@ Forge stores everything as beads:
 /forge:plan 1           # Research and plan Phase 1
 /forge:execute 1        # Build Phase 1
 /forge:verify 1         # UAT against acceptance criteria
+```
+
+**Auditing a completed phase:**
+```
+/forge:validate-phase 2      # Check all criteria were actually met
 ```
 
 **Resuming work after a break:**
