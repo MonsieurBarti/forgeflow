@@ -1,8 +1,8 @@
 class Forge < Formula
   desc "Project orchestration for Claude Code, backed by beads"
-  homepage "https://github.com/MonsieurBarti/forge"
-  url "https://github.com/MonsieurBarti/forge/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "db6cc4373cb62cdefb4b8b3bd9e2e532669762f1e43811f4ed3316f30acf7e15"
+  homepage "https://github.com/MonsieurBarti/forgeflow"
+  url "https://github.com/MonsieurBarti/forgeflow/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "4fced6b0d4f284307158d8fdc348539d4a29d2fdb6079f1dc0f59a00dfc7501b"
   license "MIT"
 
   depends_on "node"
