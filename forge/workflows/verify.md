@@ -37,12 +37,12 @@ For each task in `tasks_to_verify`, attempt to verify acceptance criteria progra
 - Verify expected behavior via CLI commands
 - Look for regressions
 
-Resolve the model for the verifier role:
+Resolve the model for the verifier agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role verifier)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-verifier --raw)
 ```
 
-For phases with multiple tasks, spawn a **forge-verifier** agent (with `model` if resolved) to handle
+For phases with multiple tasks, spawn a **forge-verifier** agent (with `model` if non-empty) to handle
 parallel verification. For single-task phases, verify inline.
 
 Record results as comments:

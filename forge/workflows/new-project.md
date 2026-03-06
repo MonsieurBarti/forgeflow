@@ -61,12 +61,12 @@ bd label add <req-id> forge:req
 
 ## 5. Create Phased Roadmap
 
-Resolve the model for the roadmapper role:
+Resolve the model for the roadmapper agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role roadmapper)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-roadmapper --raw)
 ```
 
-Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if resolved):
+Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if non-empty):
 - The project ID and vision
 - All requirement IDs with their titles and descriptions
 - Any user-specified constraints on ordering

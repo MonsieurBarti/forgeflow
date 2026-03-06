@@ -42,9 +42,9 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" config-get auto_research
 
 If `forge.auto_research` is `false`, skip research and go to step 4.
 
-Resolve the model for the researcher role:
+Resolve the model for the researcher agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role researcher)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-researcher --raw)
 ```
 
 Otherwise, spawn a **forge-researcher** agent to investigate the implementation approach:
@@ -88,9 +88,9 @@ bd update <phase-id> --notes="Approach: <summary of decisions>"
 
 ## 5. Create Task Beads
 
-Resolve the model for the planner role:
+Resolve the model for the planner agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role planner)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-planner --raw)
 ```
 
 Spawn a **forge-planner** agent to break the phase into tasks:
@@ -143,9 +143,9 @@ Run automated checks first:
 CHECK=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" plan-check <phase-id>)
 ```
 
-Resolve the model for the plan_checker role:
+Resolve the model for the plan-checker agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role plan_checker)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-plan-checker --raw)
 ```
 
 Then spawn a **forge-plan-checker** agent for thorough validation:

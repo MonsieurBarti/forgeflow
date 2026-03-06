@@ -35,11 +35,11 @@ how to proceed.
 
 ## 3. Execute Waves
 
-Before executing, resolve the model for the executor role:
+Before executing, resolve the model for the executor agent:
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role executor)
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-executor --raw)
 ```
-If `model` is non-null in the response, pass it to each Agent call below.
+If `MODEL` is non-empty, pass it to each Agent call below.
 
 For each wave, in order:
 
