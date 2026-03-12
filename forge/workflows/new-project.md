@@ -5,6 +5,22 @@ and a phased roadmap -- all stored as structured beads with dependency relations
 
 <process>
 
+## 0. Initialize Bead Tracking
+
+Check whether bead tracking is already initialized for this directory:
+
+```bash
+bd status 2>&1
+```
+
+If the output indicates bead tracking is not initialized (e.g., "no bead store", "not initialized", or a non-zero exit), ask the user for a short project prefix (e.g., "myapp") and initialize:
+
+```bash
+bd init --prefix <project_name>
+```
+
+If bead tracking is already initialized, skip this step silently and proceed.
+
 ## 1. Check for Existing Project
 
 ```bash
