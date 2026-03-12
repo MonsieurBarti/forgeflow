@@ -125,19 +125,44 @@ Project: <project vision>
 
 Instructions:
 1. Claim the task: bd update <task-id> --status=in_progress
-2. Implement the task following the description and acceptance criteria
-3. Run relevant tests to verify acceptance criteria are met
-4. Create an atomic git commit in the milestone worktree with a standardized message:
+2. Read prior context from the phase bead to benefit from earlier waves:
+   bd comment list <phase-id> --json
+   Parse comments with type 'context' to find prior agent findings, decisions, blockers, and artifacts. Use this context to inform your implementation.
+3. Implement the task following the description and acceptance criteria
+4. Run relevant tests to verify acceptance criteria are met
+5. Create an atomic git commit in the milestone worktree with a standardized message:
    Format: <type>(phase-<phase-id>): <summary> [task <task-id>]
    Where <type> is one of: feat, fix, refactor, test, docs, chore
    Example: feat(phase-abc12): add branch-create command [task xyz99]
    Use git add <specific files> — never git add . or git add -A
    NEVER run git merge or gh pr merge — merging is always left to the user
-5. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
+6. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
+7. Write structured context to the phase bead so future agents benefit from your work:
+   bd comment add <phase-id> --body '{
+     "type": "context",
+     "agent": "forge-executor",
+     "task": "<task-id>",
+     "status": "completed",
+     "findings": ["<key finding 1>", "<key finding 2>"],
+     "decisions": ["<decision made and rationale>"],
+     "artifacts": ["<file or resource produced>"],
+     "next_steps": ["<suggested follow-on if any>"]
+   }'
 
 If you encounter a blocker:
 - bd update <task-id> --notes='BLOCKED: <description>'
 - Do NOT close the task
+- Write structured context capturing the blocker:
+  bd comment add <phase-id> --body '{
+    "type": "context",
+    "agent": "forge-executor",
+    "task": "<task-id>",
+    "status": "blocked",
+    "findings": ["<what was discovered before hitting the blocker>"],
+    "decisions": [],
+    "artifacts": [],
+    "next_steps": ["<what needs to be resolved to unblock>"]
+  }'
 - Report the blocker in your response
 ")
 ```
