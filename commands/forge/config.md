@@ -6,7 +6,7 @@ allowed-tools: Bash
 ---
 
 <objective>
-Manage Forge configuration stored in the beads key-value store (`bd kv`).
+Manage Forge configuration stored in YAML settings files (`.forge/settings.yaml`).
 Configuration controls hook behavior (context thresholds, update checks)
 and workflow preferences (auto-research).
 </objective>
@@ -55,7 +55,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" config-clear KEY
 | `models.plan_checker` | Model for plan-checker agents |
 | `models.roadmapper` | Model for roadmapper agents |
 
-Model config is stored in settings files (not `bd kv`):
+Model config is stored in settings files:
 - **Global**: `~/.claude/forge.local.md` (YAML frontmatter)
 - **Per-project**: `.forge/settings.yaml`
 
@@ -72,7 +72,7 @@ Resolution order: project `.forge/settings.yaml` > global `forge.local.md` > `mo
 node "$HOME/.claude/forge/bin/forge-tools.cjs" model-profiles
 ```
 
-Hook/workflow config keys are stored with `forge.` prefix in `bd kv` (e.g., `forge.context_warning`).
+Hook/workflow config keys are stored with `forge.` prefix in settings files (e.g., `forge.context_warning`).
 Users can specify keys with or without the prefix.
 
 Format output as a readable table showing current values alongside defaults.
