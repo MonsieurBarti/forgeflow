@@ -34,7 +34,7 @@ CHECKPOINT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-load <pha
 ```
 
 If the checkpoint contains `completedWaves`, note which waves have already been executed.
-These will be skipped during wave execution in step 5.
+These will be skipped during wave execution in step 6.
 
 ## 3. Preflight Check
 
@@ -49,7 +49,24 @@ to the user and **abort execution**. Do not proceed to wave detection or task ex
 
 If `verdict` is `PASS`, continue to the next step.
 
-## 4. Detect Waves
+## 4. Gather Rollback Metadata
+
+Before execution begins, capture state needed for potential rollback:
+
+```bash
+# Get tasks already closed before this execution run
+PRE_CLOSED=$(bd children <phase-id> --json | jq -c '[.[] | select(.status == "closed") | .id]')
+
+# Current branch and commit SHA
+BRANCH=$(git branch --show-current)
+BASE_SHA=$(git rev-parse HEAD)
+```
+
+Store these values (`preExistingClosed`, `branchName`, `baseCommitSha`) in every
+checkpoint-save call during wave execution. This enables `/forge:rollback` to know
+which tasks were closed by execution (vs already closed) and which commits to revert.
+
+## 5. Detect Waves
 
 Use the detect-waves tool to automatically group tasks by dependency order:
 
@@ -62,12 +79,12 @@ This returns a JSON structure with:
 - `summary`: counts of open/in_progress/closed tasks
 
 If `summary.tasks_open` is 0 and `summary.tasks_closed` equals `summary.total_tasks`,
-the phase is already complete — skip to step 4.
+the phase is already complete — skip to step 7.
 
 If the output contains `circular_or_external_dependency`, report the cycle and ask the user
 how to proceed.
 
-## 5. Execute Waves
+## 6. Execute Waves
 
 Before executing, resolve the model for the executor agent:
 ```bash
@@ -84,9 +101,9 @@ Skip waves where `tasks_to_execute` is empty (all tasks already done).
 If a checkpoint was loaded in step 2 and this wave number is in `completedWaves`,
 skip it (already completed in a previous session).
 
-Before dispatching tasks, save a checkpoint:
+Before dispatching tasks, save a checkpoint (include rollback metadata from step 4):
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<previously completed wave numbers>],"currentWave":<N>,"taskStatuses":{<taskId>:<status>,...},"timestamp":"<ISO timestamp>"}'
+node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<previously completed wave numbers>],"currentWave":<N>,"taskStatuses":{<taskId>:<status>,...},"preExistingClosed":[<task IDs closed before execution>],"branchName":"<branch>","baseCommitSha":"<sha>","timestamp":"<ISO timestamp>"}'
 ```
 
 For tasks in this wave that are `open` or `in_progress`:
@@ -137,7 +154,7 @@ Review the updated task statuses:
   - Fix the issue inline (if quick)
   - Stop execution and report (if the blocker affects downstream waves)
 
-## 6. Phase Completion Check
+## 7. Phase Completion Check
 
 After all waves complete:
 ```bash
@@ -172,7 +189,7 @@ user that all tasks are complete and that phase closure is owned by the verify w
 
 If some tasks remain open, report what's left and suggest next steps.
 
-## 7. Suggest Next Step
+## 8. Suggest Next Step
 
 - If phase complete and `skip_verification` is false: run `/forge:verify <phase>` to validate and close the phase
 - If phase complete and `skip_verification` is true: phase is already closed — run `/forge:plan <next-phase>` to continue
