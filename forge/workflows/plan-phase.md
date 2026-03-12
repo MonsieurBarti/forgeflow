@@ -34,6 +34,35 @@ bd show <phase-id> --json
 
 If blocked, show what's blocking and suggest working on that first.
 
+## 2.5. Detect Parent Milestone and Fetch Requirements
+
+Check if the phase belongs to a milestone by looking for a parent-child dependency pointing
+up to a milestone-labeled bead:
+
+```bash
+bd dep list <phase-id> --direction=up --type=parent-child --json
+```
+
+Inspect the results for any parent bead that has the `forge:milestone` label. To confirm,
+check each parent candidate:
+
+```bash
+bd show <parent-id> --json
+```
+
+If a milestone is found, fetch its requirement beads:
+
+```bash
+bd dep list <milestone-id> --direction=up --type=parent-child --json
+```
+
+Filter this list for beads that have the `forge:req` label. For each req bead, note its
+`id` and `title` (and `description` if present). Store the full list as
+`MILESTONE_REQS` — a list of objects with `id`, `title`, and `description`.
+
+If no milestone is found, set `MILESTONE_REQS` to empty and continue — the workflow
+behaves unchanged.
+
 ## 3. Research
 
 Skip this step and go to step 4 if any of the following is true:
@@ -180,11 +209,24 @@ Research findings: <findings from step 3, if any>
 User decisions: <approach decisions from step 4>
 Requirements addressed by this phase: <relevant requirement IDs and titles>
 
+<if MILESTONE_REQS is non-empty, include this section — otherwise omit it entirely>
+Milestone Requirements (forge:req beads that this phase must help satisfy):
+<for each req in MILESTONE_REQS:>
+- <req-id>: <req-title> — <req-description if present>
+
+When creating tasks, wire validates dependencies for applicable requirements:
+  bd dep add <task-id> <req-id> --type=validates
+Do this for every task that directly implements or verifies a requirement above.
+A single task may validate multiple requirements; a requirement may be validated by multiple
+tasks. When in doubt, prefer to add the link — missing coverage is harder to fix than extra
+coverage.
+</end milestone section>
+
 For each task:
 1. Create the task bead with acceptance_criteria
 2. Add parent-child dep to the phase
 3. Add forge:task label
-4. Add validates dep to requirements it fulfills
+4. Add validates dep to requirements it fulfills (see milestone requirements above if present)
 5. Add intra-phase dependencies ONLY when strictly necessary — when task B cannot start until it has the concrete output produced by task A (e.g. task B uses a file, API, or data structure that task A creates). Independent tasks that merely belong to the same phase should have NO inter-task dependency. When in doubt, leave tasks independent.
 ")
 ```
