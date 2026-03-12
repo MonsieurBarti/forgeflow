@@ -132,7 +132,7 @@ module.exports = {
       );
 
       for (const req of requirements) {
-        const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+        const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
         let deps = [];
         if (depsRaw) {
           try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
@@ -146,7 +146,7 @@ module.exports = {
         const reqList = uncoveredReqs.map(r => `${r.id} (${r.title})`).join(', ');
         findings.push({
           number: findings.length + 1,
-          severity: 'suggestion',
+          severity: 'blocker',
           description: `${uncoveredReqs.length} requirement(s) have no validates links from any task: ${reqList}`,
           fix: `Run: bd dep add <task-id> <req-id> --type=validates for each requirement to establish traceability.`,
         });

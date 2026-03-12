@@ -63,7 +63,7 @@ bd dep add <task-b> <task-a>  # B depends on A — only add this when B truly ne
 <step name="verify">
 Check the plan:
 - Every task has acceptance_criteria
-- Key requirements have validates links
+- ALL milestone requirements have at least one validates link from a task (this is a hard gate — plan-check will reject the plan otherwise)
 - Dependencies form a valid DAG (no cycles)
 - Tasks are sized appropriately (not too large, not too small)
 </step>
