@@ -1292,7 +1292,7 @@ const commands = {
 
   /**
    * Generate a self-contained HTML dashboard for a project.
-   * Writes to ~/.agent/diagrams/forge-dashboard-<project-id>.html and returns the path.
+   * Writes to .forge/forge-dashboard-<project-id>.html (CWD) and returns the path.
    */
   'generate-dashboard'(args) {
     const projectId = args[0];
@@ -1375,8 +1375,8 @@ const commands = {
 
     const html = generateDashboardHTML(data);
 
-    // Write file
-    const diagDir = path.join(os.homedir(), '.agent', 'diagrams');
+    // Write file to .forge/ in CWD (gitignored by default)
+    const diagDir = path.join(process.cwd(), '.forge');
     fs.mkdirSync(diagDir, { recursive: true });
     const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
     fs.writeFileSync(filePath, html, 'utf8');

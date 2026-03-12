@@ -32,7 +32,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" generate-dashboard <project-id>
 This command:
 1. Calls `full-progress` internally to get all data
 2. Generates a self-contained HTML file with all CSS/JS inlined
-3. Writes it to `~/.agent/diagrams/forge-dashboard-<project-id>.html`
+3. Writes it to `.forge/forge-dashboard-<project-id>.html` in the current working directory
 4. Returns the file path
 
 The HTML follows the visual-explainer aesthetic:
