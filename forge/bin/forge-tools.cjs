@@ -140,29 +140,8 @@ function writeFrontmatter(filePath, data, body) {
 
 // --- Helpers ---
 
-function isDoltConnectionError(err) {
-  const msg = (err.message || '') + (err.stderr || '');
-  return /connection refused|dial tcp|dolt.*not running|unable to connect|connection reset|EOF/i.test(msg);
-}
-
-function restartDolt() {
-  try {
-    execFileSync('bd', ['dolt', 'start'], {
-      encoding: 'utf8',
-      timeout: 15000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    // Give Dolt a moment to become ready
-    const start = Date.now();
-    while (Date.now() - start < 2000) { /* spin-wait */ }
-  } catch (_) {
-    // Ignore restart errors; the retry will surface the real failure
-  }
-}
-
 function bd(args, opts = {}) {
   const argList = args.split(/\s+/);
-  const _retry = opts._retry || false;
   try {
     const result = execFileSync('bd', argList, {
       encoding: 'utf8',
@@ -172,17 +151,28 @@ function bd(args, opts = {}) {
     });
     return result.trim();
   } catch (err) {
-    if (!_retry && isDoltConnectionError(err)) {
-      restartDolt();
-      return bd(args, { ...opts, _retry: true });
-    }
+    if (opts.allowFail) return '';
+    throw err;
+  }
+}
+
+function git(args, opts = {}) {
+  const argList = Array.isArray(args) ? args : args.split(/\s+/);
+  try {
+    const result = execFileSync('git', argList, {
+      encoding: 'utf8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...opts,
+    });
+    return result.trim();
+  } catch (err) {
     if (opts.allowFail) return '';
     throw err;
   }
 }
 
 function bdArgs(argList, opts = {}) {
-  const _retry = opts._retry || false;
   try {
     const result = execFileSync('bd', argList, {
       encoding: 'utf8',
@@ -192,10 +182,6 @@ function bdArgs(argList, opts = {}) {
     });
     return result.trim();
   } catch (err) {
-    if (!_retry && isDoltConnectionError(err)) {
-      restartDolt();
-      return bdArgs(argList, { ...opts, _retry: true });
-    }
     if (opts.allowFail) return '';
     throw err;
   }
@@ -208,6 +194,38 @@ function bdJson(args) {
     return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+function git(args, opts = {}) {
+  const argList = Array.isArray(args) ? args : args.split(/\s+/);
+  try {
+    const result = execFileSync('git', argList, {
+      encoding: 'utf8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...opts,
+    });
+    return result.trim();
+  } catch (err) {
+    if (opts.allowFail) return '';
+    throw err;
+  }
+}
+
+function gh(args, opts = {}) {
+  const argList = Array.isArray(args) ? args : args.split(/\s+/);
+  try {
+    const result = execFileSync('gh', argList, {
+      encoding: 'utf8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...opts,
+    });
+    return result.trim();
+  } catch (err) {
+    if (opts.allowFail) return '';
+    throw err;
   }
 }
 
@@ -1037,17 +1055,13 @@ const commands = {
       process.exit(1);
     }
 
-    const phaseRaw = bdJson(`show ${phaseId}`);
-    // bd show --json returns an array; unwrap to single object
-    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+    const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
     const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
     // Enrich tasks with full details (acceptance_criteria, etc.)
     const enrichedTasks = tasks.map(task => {
-      const raw = bdJson(`show ${task.id}`);
-      // bd show --json returns an array; unwrap to single object
-      const full = Array.isArray(raw) ? raw[0] : raw;
+      const full = bdJson(`show ${task.id}`);
       return {
         id: task.id,
         title: task.title || full?.title,
@@ -1767,42 +1781,25 @@ const commands = {
 
   /**
    * Add a new phase to the end of a project's phase list.
-   * Creates the phase epic, wires parent-child to milestone and blocks dependencies.
-   * Usage: forge-tools add-phase <project-id> <milestone-id> <description>
+   * Creates the phase epic, wires parent-child and blocks dependencies.
+   * Usage: forge-tools add-phase <project-id> <description>
    */
   'add-phase'(args) {
     const projectId = args[0];
-    const milestoneId = args[1];
-    const description = args.slice(2).join(' ');
-    if (!projectId || !milestoneId || !description) {
-      console.error('Usage: forge-tools add-phase <project-id> <milestone-id> <description>');
+    const description = args.slice(1).join(' ');
+    if (!projectId || !description) {
+      console.error('Usage: forge-tools add-phase <project-id> <description>');
       process.exit(1);
     }
 
-    // Validate milestone exists and is not closed
-    const milestone = bdJson(`show ${milestoneId}`);
-    if (!milestone || !milestone.id) {
-      console.error(`ERROR: Milestone '${milestoneId}' not found.`);
-      process.exit(1);
-    }
-    if (milestone.status === 'closed') {
-      console.error(`ERROR: Milestone '${milestoneId}' is closed. Phases can only be added to active milestones.`);
-      process.exit(1);
-    }
-
-    // Get existing phases under milestone
-    const children = bdJson(`children ${milestoneId}`);
+    // Get existing phases
+    const children = bdJson(`children ${projectId}`);
     const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
-    // Also check project-level phases for numbering continuity
-    const projectChildren = bdJson(`children ${projectId}`);
-    const projectIssues = Array.isArray(projectChildren) ? projectChildren : (projectChildren?.issues || projectChildren?.children || []);
-    const allPhases = projectIssues.filter(i => (i.labels || []).includes('forge:phase'));
-
-    // Determine next phase number from all project phases
+    // Determine next phase number from titles
     let maxPhaseNum = 0;
-    for (const phase of allPhases) {
+    for (const phase of phases) {
       const match = (phase.title || '').match(/^Phase\s+(\d+)/i);
       if (match) {
         const num = parseInt(match[1], 10);
@@ -1819,13 +1816,14 @@ const commands = {
       process.exit(1);
     }
 
-    // Add parent-child link to milestone
-    bd(`dep add ${created.id} ${milestoneId} --type=parent-child`);
+    // Add parent-child link to project
+    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
     // Add forge:phase label
     bd(`label add ${created.id} forge:phase`);
 
-    // Wire ordering: new phase depends on the last existing phase under this milestone
+    // Wire ordering: new phase depends on the last existing phase
     if (phases.length > 0) {
+      // Find the last phase (highest number or last in blocks chain)
       let lastPhase = null;
       let lastNum = 0;
       for (const phase of phases) {
@@ -1850,7 +1848,6 @@ const commands = {
       title,
       description,
       project_id: projectId,
-      milestone_id: milestoneId,
       total_phases: phases.length + 1,
     });
   },
@@ -2529,137 +2526,8 @@ const commands = {
   },
 
   /**
-   * Resolve a phase bead by project ID and phase number.
-   * Queries only forge:phase labeled epics to avoid substring false-matches
-   * (e.g. phase 7 must not match phase 17).
-   *
-   * Usage: forge-tools resolve-phase <project-id> <phase-number>
-   * Returns: { found, phase } where phase is the exact matching bead.
-   */
-  'resolve-phase'(args) {
-    const projectId = args[0];
-    const phaseNumber = args[1];
-    if (!projectId || !phaseNumber) {
-      console.error('Usage: forge-tools resolve-phase <project-id> <phase-number>');
-      process.exit(1);
-    }
-
-    const num = parseInt(phaseNumber, 10);
-    if (isNaN(num)) {
-      console.error(`Invalid phase number: ${phaseNumber}`);
-      process.exit(1);
-    }
-
-    // Fetch only direct children of the project that carry the forge:phase label.
-    const children = bdJson(`children ${projectId}`);
-    if (!children) {
-      output({ found: false, phase: null });
-      return;
-    }
-
-    const issues = Array.isArray(children) ? children : (children.issues || children.children || []);
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase') && i.id !== projectId
-    );
-
-    // Sort phases by their natural order (by title prefix "Phase N:" or positional index).
-    // We extract the leading number from the title when present, otherwise fall back to
-    // the 1-based position in the children list so callers can use ordinal references.
-    const numbered = phases.map((p, idx) => {
-      const match = (p.title || '').match(/^Phase\s+(\d+)\b/i);
-      return { phase: p, n: match ? parseInt(match[1], 10) : idx + 1 };
-    });
-
-    const found = numbered.find(entry => entry.n === num);
-    if (found) {
-      output({ found: true, phase: found.phase });
-    } else {
-      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })) });
-    }
-  },
-
-  /**
    * Find the project bead in the current beads database.
    */
-  /**
-   * Migrate orphan phases (no milestone parent) to a milestone.
-   * Usage: forge-tools migrate-orphan-phases
-   */
-  'migrate-orphan-phases'() {
-    // Find all projects
-    const projectsRaw = bd('list --label forge:project --json', { allowFail: true });
-    if (!projectsRaw) {
-      output({ ok: true, message: 'No projects found', actions: [] });
-      return;
-    }
-    const projectsData = JSON.parse(projectsRaw);
-    const projects = Array.isArray(projectsData) ? projectsData : (projectsData.issues || []);
-    if (projects.length === 0) {
-      output({ ok: true, message: 'No projects found', actions: [] });
-      return;
-    }
-
-    const actions = [];
-
-    for (const project of projects) {
-      // Get all children of the project
-      const childrenData = bdJson(`children ${project.id}`);
-      const children = Array.isArray(childrenData) ? childrenData : (childrenData?.issues || childrenData?.children || []);
-
-      const phases = children.filter(c => (c.labels || []).includes('forge:phase'));
-      const milestones = children.filter(c => (c.labels || []).includes('forge:milestone'));
-
-      // For each phase, check if it has a milestone parent
-      const orphanPhases = [];
-      for (const phase of phases) {
-        // Check deps: does this phase have a parent-child to any milestone?
-        const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
-        let deps = [];
-        if (depsRaw) {
-          try { deps = JSON.parse(depsRaw); } catch {}
-          if (!Array.isArray(deps)) deps = deps.dependencies || [];
-        }
-        const hasMilestoneParent = deps.some(d =>
-          (d.type === 'parent-child' || d.dependency_type === 'parent-child') &&
-          milestones.some(m => m.id === (d.depends_on_id || d.id))
-        );
-        if (!hasMilestoneParent) {
-          orphanPhases.push(phase);
-        }
-      }
-
-      if (orphanPhases.length === 0) continue;
-
-      // Find or create a milestone for this project
-      let milestone = milestones.find(m => m.status !== 'closed');
-      if (!milestone) {
-        // Create one
-        const created = bdJson(`create --title="Milestone 1" --description="Default milestone (auto-created by migration)" --type=epic --priority=1`);
-        if (!created || !created.id) {
-          actions.push({ project: project.id, error: 'Failed to create milestone' });
-          continue;
-        }
-        bd(`dep add ${created.id} ${project.id} --type=parent-child`);
-        bd(`label add ${created.id} forge:milestone`);
-        milestone = { id: created.id, title: 'Milestone 1' };
-        actions.push({ type: 'created_milestone', project: project.id, milestone_id: milestone.id });
-      }
-
-      // Link each orphan phase to the milestone
-      for (const phase of orphanPhases) {
-        bd(`dep add ${phase.id} ${milestone.id} --type=parent-child`);
-        actions.push({ type: 'linked_phase', phase_id: phase.id, phase_title: phase.title, milestone_id: milestone.id });
-      }
-    }
-
-    output({
-      ok: true,
-      orphans_found: actions.filter(a => a.type === 'linked_phase').length,
-      milestones_created: actions.filter(a => a.type === 'created_milestone').length,
-      actions,
-    });
-  },
-
   'find-project'() {
     const result = bd('list --label forge:project --json', { allowFail: true });
     if (!result) {
@@ -2672,6 +2540,233 @@ const commands = {
       output({ found: issues.length > 0, projects: issues });
     } catch {
       output({ found: false });
+    }
+  },
+
+  // --- Git Isolation Commands ---
+
+  /**
+   * Create a git worktree at a deterministic path for a milestone.
+   * Usage: forge-tools worktree-create <milestone-id>
+   */
+  'worktree-create'(args) {
+    const milestoneId = args[0];
+    if (!milestoneId) {
+      console.error('Usage: forge-tools worktree-create <milestone-id>');
+      process.exit(1);
+    }
+    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const branch = `forge/m-${milestoneId}`;
+
+    // Check if worktree already exists
+    if (fs.existsSync(wtPath)) {
+      output({ created: false, path: wtPath, branch, reason: 'already_exists' });
+      return;
+    }
+
+    // Ensure parent dir exists
+    fs.mkdirSync(path.dirname(wtPath), { recursive: true });
+
+    // Create branch if it doesn't exist
+    const branches = git('branch --list ' + branch, { allowFail: true });
+    if (!branches) {
+      git(['branch', branch], { allowFail: true });
+    }
+
+    git(['worktree', 'add', wtPath, branch]);
+    output({ created: true, path: wtPath, branch });
+  },
+
+  /**
+   * Get the worktree path for a milestone.
+   * Usage: forge-tools worktree-path <milestone-id>
+   */
+  'worktree-path'(args) {
+    const milestoneId = args[0];
+    if (!milestoneId) {
+      console.error('Usage: forge-tools worktree-path <milestone-id>');
+      process.exit(1);
+    }
+    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const exists = fs.existsSync(wtPath);
+    output({ path: wtPath, exists });
+  },
+
+  /**
+   * Remove a git worktree for a milestone.
+   * Usage: forge-tools worktree-remove <milestone-id>
+   */
+  'worktree-remove'(args) {
+    const milestoneId = args[0];
+    if (!milestoneId) {
+      console.error('Usage: forge-tools worktree-remove <milestone-id>');
+      process.exit(1);
+    }
+    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+
+    if (!fs.existsSync(wtPath)) {
+      output({ removed: false, reason: 'not_found' });
+      return;
+    }
+
+    git(['worktree', 'remove', wtPath, '--force'], { allowFail: true });
+
+    // Clean up empty parent dirs
+    try {
+      const parent = path.dirname(wtPath);
+      if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
+        fs.rmdirSync(parent);
+      }
+    } catch { /* ignore */ }
+
+    output({ removed: true, path: wtPath });
+  },
+
+  /**
+   * Create a branch for a phase, named forge/m<milestone-id>/phase-<phase-id>.
+   * Usage: forge-tools branch-create <phase-id>
+   */
+  'branch-create'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      console.error('Usage: forge-tools branch-create <phase-id>');
+      process.exit(1);
+    }
+
+    // Resolve milestone from phase deps (bd dep list returns issues with dependency_type)
+    const deps = bdJson(`dep list ${phaseId}`);
+    const depList = Array.isArray(deps) ? deps : [];
+    const parentDeps = depList.filter(d => d.dependency_type === 'parent-child');
+
+    let milestoneId = null;
+    // dep list doesn't include labels, so check each parent via bd show
+    for (const dep of parentDeps) {
+      const raw = bdJson(`show ${dep.id}`);
+      const item = Array.isArray(raw) ? raw[0] : raw;
+      if ((item?.labels || []).includes('forge:milestone')) {
+        milestoneId = dep.id;
+        break;
+      }
+    }
+
+    const branch = milestoneId
+      ? `forge/m-${milestoneId}/phase-${phaseId}`
+      : `forge/phase-${phaseId}`;
+
+    // Check if branch already exists
+    const existing = git('branch --list ' + branch, { allowFail: true });
+    if (existing) {
+      output({ created: false, branch, reason: 'already_exists' });
+      return;
+    }
+
+    git(['branch', branch]);
+    output({ created: true, branch, phaseId, milestoneId });
+  },
+
+  /**
+   * Push a branch to origin.
+   * Usage: forge-tools branch-push <branch>
+   */
+  'branch-push'(args) {
+    const branch = args[0];
+    if (!branch) {
+      console.error('Usage: forge-tools branch-push <branch>');
+      process.exit(1);
+    }
+    git(['push', '-u', 'origin', branch]);
+    output({ pushed: true, branch });
+  },
+
+  /**
+   * Create a GitHub PR for a phase with a rich description.
+   * Usage: forge-tools pr-create <phase-id> [--base=<branch>]
+   */
+  'pr-create'(args) {
+    const phaseId = args[0];
+    const baseFlag = args.find(a => a.startsWith('--base='));
+    const base = baseFlag ? baseFlag.split('=')[1] : 'main';
+
+    if (!phaseId) {
+      console.error('Usage: forge-tools pr-create <phase-id> [--base=<branch>]');
+      process.exit(1);
+    }
+
+    // Gather phase context
+    const phaseRaw = bdJson(`show ${phaseId}`);
+    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+    const children = bdJson(`children ${phaseId}`);
+    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+    // Gather requirement coverage
+    const reqCoverage = [];
+    for (const task of tasks) {
+      const taskDeps = bdJson(`dep list ${task.id}`);
+      const taskDepList = Array.isArray(taskDeps) ? taskDeps : (taskDeps?.dependencies || []);
+      const validates = taskDepList.filter(d => d.type === 'validates');
+      for (const v of validates) {
+        reqCoverage.push({ taskId: task.id, taskTitle: task.title, reqId: v.depends_on_id });
+      }
+    }
+
+    // Build task list
+    const taskLines = tasks.map(t => {
+      const status = t.status === 'closed' ? 'x' : ' ';
+      const ac = t.acceptance_criteria ? `\n    ${t.acceptance_criteria.split('\n').join('\n    ')}` : '';
+      return `- [${status}] **${t.title}** (\`${t.id}\`)${ac}`;
+    }).join('\n');
+
+    // Build req coverage section
+    let reqSection = '';
+    if (reqCoverage.length > 0) {
+      const byReq = {};
+      for (const rc of reqCoverage) {
+        if (!byReq[rc.reqId]) byReq[rc.reqId] = [];
+        byReq[rc.reqId].push(rc.taskTitle);
+      }
+      const reqLines = Object.entries(byReq).map(([reqId, taskNames]) =>
+        `- \`${reqId}\`: ${taskNames.join(', ')}`
+      ).join('\n');
+      reqSection = `\n## Requirement Coverage\n\n${reqLines}\n`;
+    }
+
+    const title = phase?.title || `Phase ${phaseId}`;
+    const body = `## Phase Goal\n\n${phase?.description || 'N/A'}\n\n## Tasks\n\n${taskLines}\n${reqSection}\n---\n🤖 Generated by Forge`;
+
+    // Resolve the branch for this phase
+    const deps = bdJson(`dep list ${phaseId}`);
+    const depList = Array.isArray(deps) ? deps : (deps?.dependencies || []);
+    const parentDep = depList.find(d => d.type === 'parent-child');
+
+    let milestoneId = null;
+    if (parentDep) {
+      const parentRaw = bdJson(`show ${parentDep.depends_on_id}`);
+      const parent = Array.isArray(parentRaw) ? parentRaw[0] : parentRaw;
+      const parentLabels = parent?.labels || [];
+      if (parentLabels.includes('forge:milestone')) {
+        milestoneId = parentDep.depends_on_id;
+      } else if (parentLabels.includes('forge:project')) {
+        milestoneId = parentDep.depends_on_id;
+      }
+    }
+
+    const branch = milestoneId
+      ? `forge/m-${milestoneId}/phase-${phaseId}`
+      : `forge/phase-${phaseId}`;
+
+    // Create PR using gh CLI
+    try {
+      const prResult = execFileSync('gh', [
+        'pr', 'create',
+        '--title', title,
+        '--body', body,
+        '--base', base,
+        '--head', branch,
+      ], { encoding: 'utf8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] });
+      const prUrl = prResult.trim();
+      output({ created: true, url: prUrl, branch, base, title });
+    } catch (err) {
+      output({ created: false, error: err.message, branch, base });
     }
   },
 };
