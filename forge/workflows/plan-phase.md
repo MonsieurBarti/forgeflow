@@ -185,7 +185,6 @@ Show: tasks, their acceptance criteria, requirement links, and execution order (
 
 ```bash
 bd update <phase-id> --status=in_progress
-bd remember "forge:session:current-phase <phase-id>"
 ```
 
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
