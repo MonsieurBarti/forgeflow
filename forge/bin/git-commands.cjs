@@ -195,8 +195,6 @@ module.exports = {
       const parentLabels = parent?.labels || [];
       if (parentLabels.includes('forge:milestone')) {
         milestoneId = parentDep.depends_on_id;
-      } else if (parentLabels.includes('forge:project')) {
-        milestoneId = parentDep.depends_on_id;
       }
     }
 
