@@ -113,11 +113,13 @@ module.exports = {
 
     const existing = git('branch --list ' + branch, { allowFail: true });
     if (existing) {
+      git(['checkout', branch]);
       output({ created: false, branch, reason: 'already_exists' });
       return;
     }
 
     git(['branch', branch]);
+    git(['checkout', branch]);
     output({ created: true, branch, phaseId, milestoneId });
   },
 
@@ -156,7 +158,7 @@ module.exports = {
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
       const taskDepList = Array.isArray(taskDeps) ? taskDeps : (taskDeps?.dependencies || []);
-      const validates = taskDepList.filter(d => d.type === 'validates');
+      const validates = taskDepList.filter(d => d.dependency_type === 'validates');
       for (const v of validates) {
         reqCoverage.push({ taskId: task.id, taskTitle: task.title, reqId: v.depends_on_id });
       }
@@ -186,7 +188,7 @@ module.exports = {
 
     const deps = bdJson(`dep list ${phaseId}`);
     const depList = Array.isArray(deps) ? deps : (deps?.dependencies || []);
-    const parentDep = depList.find(d => d.type === 'parent-child');
+    const parentDep = depList.find(d => d.dependency_type === 'parent-child');
 
     let milestoneId = null;
     if (parentDep) {
@@ -201,6 +203,16 @@ module.exports = {
     const branch = milestoneId
       ? `forge/m-${milestoneId}/phase-${phaseId}`
       : `forge/phase-${phaseId}`;
+
+    // Idempotency: if a PR already exists for this branch, return it
+    try {
+      const existing = execFileSync('gh', [
+        'pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url',
+      ], { encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+      if (existing) {
+        return output({ created: false, url: existing, branch, base, title });
+      }
+    } catch (_) { /* no existing PR, proceed */ }
 
     try {
       const prResult = execFileSync('gh', [

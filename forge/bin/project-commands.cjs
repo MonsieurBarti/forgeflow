@@ -22,6 +22,42 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
 } = require('./core.cjs');
 
+/**
+ * Collect all phases and requirements for a project, traversing milestones.
+ * Hierarchy: Project > Milestone > Phases/Requirements
+ * Also picks up any phases/reqs still directly under the project (legacy).
+ */
+function collectProjectIssues(projectId) {
+  const children = bdJson(`children ${projectId}`);
+  const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+
+  const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
+  const phases = [];
+  const requirements = [];
+  const seenIds = new Set();
+
+  const addIssues = (items) => {
+    for (const i of items) {
+      if (seenIds.has(i.id)) continue;
+      seenIds.add(i.id);
+      if ((i.labels || []).includes('forge:phase')) phases.push(i);
+      else if ((i.labels || []).includes('forge:req') || i.issue_type === 'feature') requirements.push(i);
+    }
+  };
+
+  // Collect from milestones (correct hierarchy)
+  for (const ms of milestones) {
+    const msChildren = bdJson(`children ${ms.id}`);
+    const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
+    addIssues(msIssues);
+  }
+
+  // Also collect any legacy direct children
+  addIssues(issues);
+
+  return { milestones, phases, requirements };
+}
+
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
 
 function esc(s) {
@@ -309,21 +345,7 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const children = bdJson(`children ${projectId}`);
-
-    if (!children) {
-      output({ project, requirements: [], phases: [], tasks: [] });
-      return;
-    }
-
-    const issues = Array.isArray(children) ? children : (children.issues || children.children || []);
-
-    const requirements = issues.filter(i =>
-      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
-    );
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
-    ).filter(i => i.id !== projectId);
+    const { phases, requirements } = collectProjectIssues(projectId);
 
     output({
       project,
@@ -349,12 +371,7 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase')
-    );
+    const { phases } = collectProjectIssues(projectId);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -386,15 +403,7 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-
-    const requirements = issues.filter(i =>
-      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
-    );
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase')
-    );
+    const { phases, requirements } = collectProjectIssues(projectId);
 
     const phaseDetails = [];
     for (const phase of phases) {
@@ -465,15 +474,7 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-
-    const requirements = issues.filter(i =>
-      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
-    );
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase')
-    );
+    const { phases, requirements } = collectProjectIssues(projectId);
 
     const phaseDetails = [];
     for (const phase of phases) {
@@ -1574,7 +1575,9 @@ module.exports = {
     }
 
     const title = `Milestone: ${name}`;
-    const created = bdJson(`create --title="${title}" --type=epic --priority=1`);
+    const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
+    let created;
+    try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       console.error('Failed to create milestone bead');
       process.exit(1);

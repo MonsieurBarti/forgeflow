@@ -510,12 +510,8 @@ module.exports = {
     const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
-    const projectChildren = bdJson(`children ${projectId}`);
-    const projectIssues = Array.isArray(projectChildren) ? projectChildren : (projectChildren?.issues || projectChildren?.children || []);
-    const allPhases = projectIssues.filter(i => (i.labels || []).includes('forge:phase'));
-
     let maxPhaseNum = 0;
-    for (const phase of allPhases) {
+    for (const phase of phases) {
       const match = (phase.title || '').match(/^Phase\s+(\d+)/i);
       if (match) {
         const num = parseInt(match[1], 10);
@@ -525,7 +521,9 @@ module.exports = {
     const nextNum = maxPhaseNum + 1;
     const title = `Phase ${nextNum}: ${description}`;
 
-    const created = bdJson(`create --title="${title}" --description="${description}" --type=epic --priority=1`);
+    const createRaw = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=epic', '--priority=1', '--json']);
+    let created;
+    try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       console.error('Failed to create phase bead');
       process.exit(1);
@@ -615,7 +613,9 @@ module.exports = {
     const phaseNum = `${afterPhaseNum}.${nextDecimal}`;
     const title = `Phase ${phaseNum}: ${description}`;
 
-    const created = bdJson(`create --title="${title}" --description="${description}" --type=epic --priority=1`);
+    const createRaw = bdArgs(['create', `--title=${title}`, `--description=${description}`, '--type=epic', '--priority=1', '--json']);
+    let created;
+    try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       console.error('Failed to create phase bead');
       process.exit(1);
