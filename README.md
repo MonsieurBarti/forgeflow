@@ -29,7 +29,7 @@ The complexity is in the system. What you see: a few commands that just work.
 
 - [Claude Code](https://claude.ai/claude-code) installed
 - [beads](https://github.com/steveyegge/beads) (`bd`) installed and configured
-- Node.js 18+
+- Node.js 20+
 
 ## Install
 
