@@ -156,6 +156,21 @@ function bd(args, opts = {}) {
   }
 }
 
+function bdArgs(argList, opts = {}) {
+  try {
+    const result = execFileSync('bd', argList, {
+      encoding: 'utf8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...opts,
+    });
+    return result.trim();
+  } catch (err) {
+    if (opts.allowFail) return '';
+    throw err;
+  }
+}
+
 function bdJson(args) {
   const raw = bd(`${args} --json`);
   if (!raw) return null;
@@ -740,11 +755,11 @@ const commands = {
     const notesValue = `forge:checkpoint ${checkpointJson}`;
 
     // Write to phase bead notes (durable storage)
-    bd(`update ${phaseId} --notes ${JSON.stringify(notesValue)}`, { allowFail: false });
+    bdArgs(['update', phaseId, '--notes', notesValue], { allowFail: false });
 
     // Also store in bd remember for fast lookup
     const memoryKey = `forge:checkpoint:${phaseId}`;
-    bd(`remember ${JSON.stringify(checkpointJson)} --key ${JSON.stringify(memoryKey)}`, { allowFail: true });
+    bdArgs(['remember', checkpointJson, '--key', memoryKey], { allowFail: true });
 
     output({ saved: true, phaseId, checkpoint });
   },
@@ -765,7 +780,8 @@ const commands = {
 
     // Try loading from phase bead notes (primary/durable source)
     try {
-      const phase = bdJson(`show ${phaseId}`);
+      const phaseRaw = bdJson(`show ${phaseId}`);
+      const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
       const notes = phase?.notes || '';
       const match = notes.match(/forge:checkpoint\s+(\{[\s\S]*\})/);
       if (match) {
@@ -777,7 +793,7 @@ const commands = {
     if (!checkpoint) {
       try {
         const memKey = `forge:checkpoint:${phaseId}`;
-        const mem = bd(`memories ${memKey}`, { allowFail: true });
+        const mem = bdArgs(['memories', memKey], { allowFail: true });
         if (mem) {
           // memories output is freeform; look for JSON object
           const jsonMatch = mem.match(/\{[\s\S]*\}/);
