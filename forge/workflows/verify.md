@@ -79,12 +79,48 @@ If some tasks need rework:
 
 ## 6. Requirement Coverage Check
 
-Check which requirements this phase's tasks validate:
+Identify the parent milestone for this phase:
 ```bash
-bd dep list <task-id> --type validates
+node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>
 ```
 
-Report any requirements that still have no validated tasks across all closed phases.
+Look up the phase's parent bead in the context. If no parent milestone exists, skip this step silently.
+
+If a milestone is found, fetch its forge:req beads:
+```bash
+bd dep list <milestone-id> --type contains --json
+# Filter results to beads with type forge:req
+```
+
+For each forge:req bead found, check whether any task in the current phase has a `validates` link to it:
+```bash
+bd dep list <req-id> --type validates --json
+# Check if any of the validating task IDs belong to this phase's task list
+```
+
+Build the coverage map:
+- **Covered**: at least one task in this phase has a `validates` link to the req
+- **Uncovered**: no task in this phase validates the req (may be covered by another phase)
+
+If any reqs are uncovered, show a warning (not a hard failure):
+```
+------------------------------------------------------------
+ WARNING: Uncovered Requirements in Parent Milestone
+------------------------------------------------------------
+
+The following milestone requirements have no validates link
+from tasks in this phase. They may be covered by other phases,
+or they may need attention.
+
+  - <req-title> (<req-id>)
+  - <req-title> (<req-id>)
+
+To add coverage: bd dep add <task-id> <req-id> --type validates
+Or run /forge:audit-milestone to check full milestone coverage.
+------------------------------------------------------------
+```
+
+If all reqs are covered by this phase's tasks, or if no milestone/reqs exist, show nothing.
 
 Suggest next step: `/forge:plan <next-phase>` or `/forge:progress`.
 
