@@ -6,7 +6,7 @@ allowed-tools: Read, Bash, Grep, Glob, AskUserQuestion
 ---
 
 <objective>
-Diagnose the health of the current Forge project. Checks bead graph integrity (labels, dependencies, state consistency), Forge installation files, and bd kv config validity. Optionally repair fixable issues.
+Diagnose the health of the current Forge project. Checks bead graph integrity (labels, dependencies, state consistency), Forge installation files, and YAML settings validity. Optionally repair fixable issues.
 </objective>
 
 <context>
