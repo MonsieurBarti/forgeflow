@@ -424,7 +424,7 @@ module.exports = {
 
     const reqCoverage = [];
     for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
       let deps = [];
       if (depsRaw) {
         try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
@@ -501,7 +501,7 @@ module.exports = {
 
     const reqCoverage = [];
     for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
       let deps = [];
       if (depsRaw) { try { deps = JSON.parse(depsRaw); } catch { /* ignore */ } }
       reqCoverage.push({
@@ -705,7 +705,7 @@ module.exports = {
 
     const uncoveredReqs = [];
     for (const req of requirements) {
-      const deps = bd(`dep list ${req.id} --type validates`, { allowFail: true });
+      const deps = bd(`dep list ${req.id} --direction=up --type validates`, { allowFail: true });
       if (!deps || deps.trim() === '' || deps.includes('No dependencies')) {
         uncoveredReqs.push(req);
       }
@@ -1518,7 +1518,7 @@ module.exports = {
     });
 
     const reqCoverage = requirements.map(req => {
-      const depsRaw = bd(`dep list ${req.id} --type validates --json`, { allowFail: true });
+      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
       let validators = [];
       if (depsRaw) {
         try {
