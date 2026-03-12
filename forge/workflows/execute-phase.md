@@ -135,17 +135,37 @@ PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
 If all tasks are closed:
+
+First, save the final checkpoint:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<all wave numbers>],"taskStatuses":{<all tasks>:"closed"},"timestamp":"<ISO timestamp>","completed":true}'
+```
+
+Then load settings to check the verification gate:
+```bash
+SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
+```
+
+Parse `skip_verification` from the settings JSON. It defaults to `false` if not present.
+
+**If `skip_verification` is true** — close the phase directly:
+```bash
 bd close <phase-id> --reason="All tasks completed"
 bd remember "forge:phase:<id>:completed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
+
+**If `skip_verification` is false (default)** — do NOT close the phase. Instead, inform the
+user that all tasks are complete and that phase closure is owned by the verify workflow:
+
+> All tasks in phase `<phase-id>` are complete. Run `/forge:verify <phase-id>` to validate
+> acceptance criteria and close the phase. Phase closure is handled by the verify workflow.
 
 If some tasks remain open, report what's left and suggest next steps.
 
 ## 7. Suggest Next Step
 
-- If phase complete: `/forge:verify <phase>` to verify, or `/forge:plan <next-phase>`
+- If phase complete and `skip_verification` is false: run `/forge:verify <phase>` to validate and close the phase
+- If phase complete and `skip_verification` is true: phase is already closed — run `/forge:plan <next-phase>` to continue
 - If tasks remaining: fix blockers, then `/forge:execute <phase>` again
 - Check overall progress: `/forge:progress`
 
