@@ -185,7 +185,7 @@ For each task:
 2. Add parent-child dep to the phase
 3. Add forge:task label
 4. Add validates dep to requirements it fulfills
-5. Add inter-task dependencies if needed
+5. Add intra-phase dependencies ONLY when strictly necessary — when task B cannot start until it has the concrete output produced by task A (e.g. task B uses a file, API, or data structure that task A creates). Independent tasks that merely belong to the same phase should have NO inter-task dependency. When in doubt, leave tasks independent.
 ")
 ```
 
@@ -205,9 +205,12 @@ Link tasks to requirements they fulfill:
 bd dep add <task-id> <req-id> --type=validates
 ```
 
-Add dependencies between tasks if needed:
+Add intra-phase dependencies ONLY when strictly necessary — when task B cannot start until it
+has the concrete output produced by task A (e.g. task B uses a file, API, or data structure
+that task A creates). Independent tasks that merely belong to the same phase should have NO
+inter-task dependency. When in doubt, leave tasks independent.
 ```bash
-bd dep add <task-b-id> <task-a-id>  # task B depends on task A
+bd dep add <task-b-id> <task-a-id>  # task B depends on A — only add when B truly needs A's output
 ```
 
 ## 6. Verify Plan (Plan Verification Loop)
