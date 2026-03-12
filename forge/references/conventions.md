@@ -112,7 +112,7 @@ Session memories persist the most recent active context so sessions can be resum
 
 ```bash
 # Write a memory
-bd remember forge:phase:<id>:approach "Two-wave implementation: ..."
+bd remember --key "forge:phase:<id>:approach" "Two-wave implementation: ..."
 
 # Read a specific memory
 bd memories forge:phase:<id>:approach

@@ -63,7 +63,7 @@ bd dep add <milestone-id> <project-id> --type=parent-child
 
 Save for reference:
 ```bash
-bd remember "forge:milestone:<id>:goal <one-line goal>"
+bd remember --key "forge:milestone:<id>:goal" "<one-line goal>"
 ```
 
 ## 5. Define Requirements
@@ -155,7 +155,7 @@ Summarize:
 
 Save milestone for future reference:
 ```bash
-bd remember "forge:session:last-milestone <milestone-id>"
+bd remember --key "forge:session:last-milestone" "<milestone-id>"
 ```
 
 </process>

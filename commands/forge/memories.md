@@ -33,6 +33,6 @@ Read the Forge conventions (especially the Memories section): @~/.claude/forge/r
 
 4. After displaying memories, offer context:
    - Note that memories are written by Forge workflows automatically
-   - Mention that `bd remember <key> <value>` adds a memory and `bd forget <key>` removes one
+   - Mention that `bd remember --key "<key>" "<value>"` adds a memory and `bd forget <key>` removes one
    - Suggest `/forge:resume` if the user wants to restore a full session context
 </process>

@@ -57,7 +57,7 @@ bd label add <project-id> forge:project
 
 Save the vision as a memory:
 ```bash
-bd remember "forge:project:<id>:vision <one-line vision>"
+bd remember --key "forge:project:<id>:vision" "<one-line vision>"
 ```
 
 ## 4. Define Requirements
@@ -139,7 +139,7 @@ Summarize:
 
 Save project ID for future reference:
 ```bash
-bd remember "forge:session:project-id <project-id>"
+bd remember --key "forge:session:project-id" "<project-id>"
 ```
 
 </process>

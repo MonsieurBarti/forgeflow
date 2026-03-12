@@ -22,7 +22,7 @@ Save current session context to beads memory for resumption in a future session.
 
 3. If the user provided additional context or notes, save those as a decision memory:
    ```bash
-   bd remember "forge:session:notes <user's notes about current state>"
+   bd remember --key "forge:session:notes" "<user's notes about current state>"
    ```
 
 4. Report what was saved:

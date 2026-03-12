@@ -272,7 +272,7 @@ bd close {debug_id} --reason="Root cause: {cause}. Fix: {description}"
 
 **Save durable insights (survives bead closure):**
 ```bash
-bd remember "forge:debug:{slug}: {key insight for future debugging}"
+bd remember --key "forge:debug:{slug}" "{key insight for future debugging}"
 ```
 
 ### Resume Behavior
@@ -467,7 +467,7 @@ bd close {debug_id} --reason="Root cause: {root_cause}. Fix: {fix_description}"
 
 Save durable insights for future debugging:
 ```bash
-bd remember "forge:debug:{slug}: {key insight}"
+bd remember --key "forge:debug:{slug}" "{key insight}"
 ```
 
 **Commit the fix:**

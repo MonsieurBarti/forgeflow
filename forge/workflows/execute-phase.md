@@ -178,7 +178,7 @@ Parse `skip_verification` from the settings JSON. It defaults to `false` if not 
 **If `skip_verification` is true** — close the phase directly:
 ```bash
 bd close <phase-id> --reason="All tasks completed"
-bd remember "forge:phase:<id>:completed $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+bd remember --key "forge:phase:<id>:completed" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
 **If `skip_verification` is false (default)** — do NOT close the phase. Instead, inform the
