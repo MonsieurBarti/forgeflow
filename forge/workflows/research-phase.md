@@ -82,8 +82,21 @@ Produce a concise research summary covering:
 - **Common pitfalls** -- mistakes and gotchas to avoid
 - **Complexity estimate** -- simple/medium/complex with reasoning
 
-Write your findings as a comment on the phase bead:
-bd comments add <phase-id> 'Research: <your findings>'
+Write your findings as a structured JSON context comment on the phase bead using context-write:
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{
+  "agent": "forge-researcher",
+  "status": "completed",
+  "findings": [
+    "Recommended approach: <how to implement this>",
+    "Standard stack: <libraries and tools to use>",
+    "Architecture patterns: <established patterns for this domain>",
+    "Do not hand-roll: <things that should use existing solutions>",
+    "Common pitfalls: <mistakes and gotchas to avoid>"
+  ],
+  "decisions": [
+    "Complexity estimate: <simple|medium|complex> — <reasoning>"
+  ]
+}'
 ")
 ```
 

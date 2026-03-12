@@ -95,10 +95,38 @@ Produce a concise research summary covering:
 3. Potential pitfalls
 4. Estimated complexity
 
-Write your findings as a comment on the phase bead:
-bd comments add <phase-id> '<findings>'
+Write your findings as a structured JSON context comment on the phase bead:
+node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
+  \"agent\": \"forge-researcher\",
+  \"status\": \"completed\",
+  \"findings\": [
+    \"Recommended approach: <how to implement this>\",
+    \"Standard stack: <libraries and tools to use>\",
+    \"Architecture patterns: <established patterns for this domain>\",
+    \"Common pitfalls: <mistakes and gotchas to avoid>\"
+  ],
+  \"decisions\": [
+    \"Complexity estimate: <simple|medium|complex> — <reasoning>\"
+  ]
+}'
 ")
 ```
+
+After the researcher returns, read back the structured context to extract findings for the planner:
+
+```bash
+RESEARCH_CTX=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" context-read <phase-id>)
+```
+
+Parse the JSON output: look for the latest entry with `agent == "forge-researcher"` and `status == "completed"`. Extract:
+- `findings` array → join as bullet list for `Research findings`
+- `decisions` array → join as bullet list (includes complexity estimate)
+
+**Backward compatibility:** If `context-read` returns no structured entries (only free-text research comments exist), fall back to reading phase comments directly:
+```bash
+bd comments <phase-id>
+```
+Use the most recent comment text as the research findings. The planner prompt always receives a research findings string — either from structured JSON or from the free-text fallback.
 
 ## 4. Context Check and Approach Discussion
 
@@ -212,7 +240,8 @@ Break this phase into 2-5 concrete tasks:
 Phase: <phase title> (<phase-id>)
 Goal: <phase description>
 Project: <project-id>
-Research findings: <findings from step 3, if any>
+Research findings: <findings from step 3 — bullet list from structured JSON or free-text fallback; omit section if no research was done>
+Complexity estimate: <from structured context decisions field if available>
 User decisions: <approach decisions from step 4>
 Requirements addressed by this phase: <relevant requirement IDs and titles>
 
