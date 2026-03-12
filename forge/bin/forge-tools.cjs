@@ -1037,13 +1037,17 @@ const commands = {
       process.exit(1);
     }
 
-    const phase = bdJson(`show ${phaseId}`);
+    const phaseRaw = bdJson(`show ${phaseId}`);
+    // bd show --json returns an array; unwrap to single object
+    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
     const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
 
     // Enrich tasks with full details (acceptance_criteria, etc.)
     const enrichedTasks = tasks.map(task => {
-      const full = bdJson(`show ${task.id}`);
+      const raw = bdJson(`show ${task.id}`);
+      // bd show --json returns an array; unwrap to single object
+      const full = Array.isArray(raw) ? raw[0] : raw;
       return {
         id: task.id,
         title: task.title || full?.title,
@@ -2505,6 +2509,56 @@ const commands = {
       title,
       project_id: projectId,
     });
+  },
+
+  /**
+   * Resolve a phase bead by project ID and phase number.
+   * Queries only forge:phase labeled epics to avoid substring false-matches
+   * (e.g. phase 7 must not match phase 17).
+   *
+   * Usage: forge-tools resolve-phase <project-id> <phase-number>
+   * Returns: { found, phase } where phase is the exact matching bead.
+   */
+  'resolve-phase'(args) {
+    const projectId = args[0];
+    const phaseNumber = args[1];
+    if (!projectId || !phaseNumber) {
+      console.error('Usage: forge-tools resolve-phase <project-id> <phase-number>');
+      process.exit(1);
+    }
+
+    const num = parseInt(phaseNumber, 10);
+    if (isNaN(num)) {
+      console.error(`Invalid phase number: ${phaseNumber}`);
+      process.exit(1);
+    }
+
+    // Fetch only direct children of the project that carry the forge:phase label.
+    const children = bdJson(`children ${projectId}`);
+    if (!children) {
+      output({ found: false, phase: null });
+      return;
+    }
+
+    const issues = Array.isArray(children) ? children : (children.issues || children.children || []);
+    const phases = issues.filter(i =>
+      (i.labels || []).includes('forge:phase') && i.id !== projectId
+    );
+
+    // Sort phases by their natural order (by title prefix "Phase N:" or positional index).
+    // We extract the leading number from the title when present, otherwise fall back to
+    // the 1-based position in the children list so callers can use ordinal references.
+    const numbered = phases.map((p, idx) => {
+      const match = (p.title || '').match(/^Phase\s+(\d+)\b/i);
+      return { phase: p, n: match ? parseInt(match[1], 10) : idx + 1 };
+    });
+
+    const found = numbered.find(entry => entry.n === num);
+    if (found) {
+      output({ found: true, phase: found.phase });
+    } else {
+      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })) });
+    }
   },
 
   /**

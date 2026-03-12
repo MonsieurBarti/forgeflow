@@ -7,15 +7,16 @@ beads with acceptance criteria, and link them to requirements for traceability.
 
 ## 1. Resolve Phase
 
-If a phase number was given (e.g., "2"), find the matching phase bead:
+If a phase number was given (e.g., "2"), find the exact matching phase bead:
 ```bash
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 ```
-Extract the project ID, then:
+Extract the project ID, then use `resolve-phase` to do an **exact** numeric match
+against `forge:phase`-labeled epics only (prevents phase 7 from matching phase 17):
 ```bash
-CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context <project-id>)
+PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-phase <project-id> <phase-number>)
 ```
-Match the phase number to the ordered list of phases.
+Parse `phase.id` from the result. If `found` is false, report the available phases and stop.
 
 If a phase ID was given directly, use it.
 

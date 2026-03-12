@@ -7,7 +7,17 @@ in parallel via subagents. Each task gets an atomic git commit on completion.
 
 ## 1. Resolve Phase
 
-Same resolution logic as plan-phase: accept phase number, ID, or auto-detect current.
+If a phase number was given (e.g., "7"), resolve it with an **exact** numeric match so that
+phase 7 never accidentally matches phase 17:
+```bash
+PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
+PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-phase <project-id> <phase-number>)
+```
+Parse `phase.id` from the result. If `found` is false, report available phases and stop.
+
+If a phase ID was given directly, use it.
+
+If nothing was given, auto-detect by finding the current `in_progress` phase.
 
 ```bash
 CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
