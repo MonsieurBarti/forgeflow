@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { homedir } = require('os');
 const {
   bd, bdArgs, bdJson, output,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
@@ -21,6 +21,7 @@ const {
   MODEL_PROFILES, ROLE_TO_AGENT,
   parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
   resolveAgentModel, loadModelProfile, loadModelOverrides,
+  findGitRoot,
 } = require('./core.cjs');
 
 /**
@@ -35,7 +36,7 @@ function detectWorkspaces(rootDir) {
       const clean = pattern.replace(/\/\*\*?$/, '').replace(/\*$/, '');
       if (clean.includes('*')) continue; // skip complex globs
       const dir = path.join(root, clean);
-      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      if (fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
         // If the pattern ended with /*, list subdirectories
         if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
           try {
@@ -77,7 +78,6 @@ function detectWorkspaces(rootDir) {
   if (fs.existsSync(pnpmPath)) {
     try {
       const raw = fs.readFileSync(pnpmPath, 'utf8');
-      const parsed = parseSimpleYaml(raw);
       // pnpm-workspace.yaml has: packages: ["apps/*", "packages/*"]
       // parseSimpleYaml may not handle arrays well, so parse manually
       const patterns = [];
@@ -145,6 +145,30 @@ function detectWorkspaces(rootDir) {
 }
 
 /**
+ * Extract workspace_path from a forge:project bead's design field.
+ * The design field stores workspace_paths as simple YAML, e.g.:
+ *   workspace_paths:
+ *     <project-id>: packages/app1
+ * Returns the path string for this bead, or null if not found.
+ */
+function extractWorkspacePath(bead) {
+  if (!bead || !bead.design) return null;
+  const parsed = parseSimpleYaml(bead.design);
+  if (parsed.workspace_paths && typeof parsed.workspace_paths === 'object') {
+    // workspace_paths is keyed by project ID — look for this bead's ID
+    if (parsed.workspace_paths[bead.id] !== undefined) {
+      return String(parsed.workspace_paths[bead.id]);
+    }
+    // Also check if there's only one entry (common case)
+    const values = Object.values(parsed.workspace_paths);
+    if (values.length === 1) return String(values[0]);
+  }
+  // Fallback: check for a flat workspace_path field
+  if (parsed.workspace_path) return String(parsed.workspace_path);
+  return null;
+}
+
+/**
  * Collect all phases and requirements for a project, traversing milestones.
  * Hierarchy: Project > Milestone > Phases/Requirements
  * Also picks up any phases/reqs still directly under the project (legacy).
@@ -178,58 +202,6 @@ function collectProjectIssues(projectId) {
   addIssues(issues);
 
   return { milestones, phases, requirements };
-}
-
-/**
- * Build per-phase task details for a list of phases.
- * Returns an array of phase detail objects with task breakdown.
- * includeFull=true includes description/acceptance_criteria on tasks.
- */
-function buildPhaseDetails(phases, includeFull = false) {
-  const phaseDetails = [];
-  for (const phase of phases) {
-    const phaseChildren = bdJson(`children ${phase.id}`);
-    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-    const detail = {
-      id: phase.id,
-      title: phase.title,
-      status: phase.status,
-      tasks_total: tasks.length,
-      tasks_open: tasks.filter(t => t.status === 'open').length,
-      tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
-      tasks_closed: tasks.filter(t => t.status === 'closed').length,
-    };
-    if (includeFull) {
-      detail.description = phase.description || '';
-      detail.tasks = tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' }));
-    } else {
-      detail.tasks = tasks.map(t => ({ id: t.id, title: t.title, status: t.status }));
-    }
-    phaseDetails.push(detail);
-  }
-  return phaseDetails;
-}
-
-/**
- * Build requirement coverage data for a list of requirements.
- * Returns an array of { id, title, covered, covering_tasks } objects.
- */
-function buildReqCoverage(requirements) {
-  const reqCoverage = [];
-  for (const req of requirements) {
-    const depsRaw = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates', '--json'], { allowFail: true });
-    let deps = [];
-    if (depsRaw) {
-      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
-    }
-    reqCoverage.push({
-      id: req.id,
-      title: req.title,
-      covered: Array.isArray(deps) && deps.length > 0,
-      covering_tasks: Array.isArray(deps) ? deps.length : 0,
-    });
-  }
-  return reqCoverage;
 }
 
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
@@ -331,7 +303,7 @@ function generateDashboardHTML(data) {
 <title>${esc(projectTitle)} — Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- TODO: add integrity="sha384-..." crossorigin="anonymous" for SRI once hash is pinned -->
+<!-- TODO: Add integrity="sha384-..." crossorigin="anonymous" once Chart.js version is pinned -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>
 <style>
   :root {
@@ -582,8 +554,37 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = buildPhaseDetails(phases);
-    const reqCoverage = buildReqCoverage(requirements);
+    const phaseDetails = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+
+      phaseDetails.push({
+        id: phase.id,
+        title: phase.title,
+        status: phase.status,
+        tasks_total: tasks.length,
+        tasks_open: tasks.filter(t => t.status === 'open').length,
+        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        tasks_closed: tasks.filter(t => t.status === 'closed').length,
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
+      });
+    }
+
+    const reqCoverage = [];
+    for (const req of requirements) {
+      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) {
+        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      }
+      reqCoverage.push({
+        id: req.id,
+        title: req.title,
+        covered: Array.isArray(deps) && deps.length > 0,
+        covering_tasks: Array.isArray(deps) ? deps.length : 0,
+      });
+    }
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -624,14 +625,40 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = buildPhaseDetails(phases, true);
+    const phaseDetails = [];
+    for (const phase of phases) {
+      const phaseChildren = bdJson(`children ${phase.id}`);
+      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      phaseDetails.push({
+        id: phase.id,
+        title: phase.title,
+        description: phase.description || '',
+        status: phase.status,
+        tasks_total: tasks.length,
+        tasks_open: tasks.filter(t => t.status === 'open').length,
+        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        tasks_closed: tasks.filter(t => t.status === 'closed').length,
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' })),
+      });
+    }
 
     for (const pd of phaseDetails) {
       pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
     }
     phaseDetails.sort((a, b) => a._sortKey - b._sortKey);
 
-    const reqCoverage = buildReqCoverage(requirements);
+    const reqCoverage = [];
+    for (const req of requirements) {
+      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+      let deps = [];
+      if (depsRaw) { try { deps = JSON.parse(depsRaw); } catch { /* ignore */ } }
+      reqCoverage.push({
+        id: req.id,
+        title: req.title,
+        covered: Array.isArray(deps) && deps.length > 0,
+        covering_tasks: Array.isArray(deps) ? deps.length : 0,
+      });
+    }
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -650,8 +677,7 @@ module.exports = {
 
     const diagDir = path.join(process.cwd(), '.forge');
     fs.mkdirSync(diagDir, { recursive: true });
-    const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, '');
-    const filePath = path.join(diagDir, `forge-dashboard-${safeId}.html`);
+    const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
     fs.writeFileSync(filePath, html, 'utf8');
 
     output({ path: filePath, projectId, timestamp });
@@ -800,14 +826,18 @@ module.exports = {
       fix_targets: unlabeledPhases.map(p => p.id),
     });
 
-    // Cache phase children to avoid redundant bdJson calls in subsequent loops.
-    const phaseTasksCache = new Map();
-    const allTasks = [];
-    const unlabeledTasks = [];
+    // Cache phase children once for reuse in task-labels and closeable-phase loops
+    const phaseChildrenMap = new Map();
     for (const phase of phases) {
       const phaseChildren = bdJson(`children ${phase.id}`);
       const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-      phaseTasksCache.set(phase.id, tasks);
+      phaseChildrenMap.set(phase.id, tasks);
+    }
+
+    const allTasks = [];
+    const unlabeledTasks = [];
+    for (const phase of phases) {
+      const tasks = phaseChildrenMap.get(phase.id);
       for (const t of tasks) {
         allTasks.push({ ...t, phase_id: phase.id });
         if (!(t.labels || []).includes('forge:task') && !(t.labels || []).includes('forge:research')) {
@@ -847,8 +877,7 @@ module.exports = {
     const closedPhasesWithOpenTasks = [];
     const closeablePhases = [];
     for (const phase of phases) {
-      // Reuse cached children to avoid a second bdJson call per phase.
-      const tasks = phaseTasksCache.get(phase.id) || [];
+      const tasks = phaseChildrenMap.get(phase.id);
       const openTasks = tasks.filter(t => t.status !== 'closed');
 
       if (phase.status === 'closed' && openTasks.length > 0) {
@@ -887,37 +916,21 @@ module.exports = {
     const numericKeys = ['context_warning', 'context_critical'];
     const booleanKeys = ['update_check', 'auto_research'];
 
-    // Fetch all kv values in one call and filter in-memory to avoid N individual get calls.
-    const kvListRaw = bdArgs(['kv', 'list', '--json'], { allowFail: true });
-    let kvMap = {};
-    if (kvListRaw) {
-      try {
-        const parsed = JSON.parse(kvListRaw);
-        if (Array.isArray(parsed)) {
-          for (const item of parsed) kvMap[item.key] = item.value;
-        } else if (parsed && typeof parsed === 'object') {
-          kvMap = parsed;
-        }
-      } catch { /* ignore */ }
-    }
-
     for (const key of numericKeys) {
-      const fullKey = `forge.${key}`;
-      const val = kvMap[fullKey];
-      if (val !== undefined && String(val).trim() !== '') {
-        const num = parseFloat(String(val).trim());
+      const val = bd(`kv get forge.${key}`, { allowFail: true });
+      if (val && val.trim() !== '') {
+        const num = parseFloat(val.trim());
         if (isNaN(num) || num < 0 || num > 1) {
-          configIssues.push({ key: fullKey, value: String(val).trim(), reason: 'must be a number between 0 and 1' });
+          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be a number between 0 and 1' });
         }
       }
     }
 
     for (const key of booleanKeys) {
-      const fullKey = `forge.${key}`;
-      const val = kvMap[fullKey];
-      if (val !== undefined && String(val).trim() !== '') {
-        if (!['true', 'false'].includes(String(val).trim().toLowerCase())) {
-          configIssues.push({ key: fullKey, value: String(val).trim(), reason: 'must be true or false' });
+      const val = bd(`kv get forge.${key}`, { allowFail: true });
+      if (val && val.trim() !== '') {
+        if (!['true', 'false'].includes(val.trim().toLowerCase())) {
+          configIssues.push({ key: `forge.${key}`, value: val.trim(), reason: 'must be true or false' });
         }
       }
     }
@@ -993,7 +1006,7 @@ module.exports = {
       severity: globalSettingsOk ? 'ok' : 'warning',
     });
 
-    const forgeDir = path.join(os.homedir(), '.claude', 'forge');
+    const forgeDir = path.join(homedir(), '.claude', 'forge');
 
     const expectedFiles = [
       { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
@@ -1003,11 +1016,7 @@ module.exports = {
       { path: 'workflows/verify.md', label: 'verify workflow' },
       { path: 'workflows/progress.md', label: 'progress workflow' },
       { path: 'workflows/health.md', label: 'health workflow' },
-      { path: 'workflows/quality-gate.md', label: 'quality-gate workflow' },
       { path: 'references/conventions.md', label: 'conventions reference' },
-      { path: '../agents/forge-security-auditor.md', label: 'forge-security-auditor agent' },
-      { path: '../agents/forge-code-reviewer.md', label: 'forge-code-reviewer agent' },
-      { path: '../agents/forge-performance-auditor.md', label: 'forge-performance-auditor agent' },
     ];
 
     const missingFiles = [];
@@ -1231,9 +1240,6 @@ module.exports = {
         clearNestedKey(existing, topKey, subKey);
         fs.writeFileSync(projectPath, toSimpleYaml(existing));
       } catch { /* file doesn't exist */ }
-    } else {
-      console.error('Scope must be "global" or "project"');
-      process.exit(1);
     }
 
     output({ ok: true, scope, key, cleared: true });
@@ -1259,41 +1265,43 @@ module.exports = {
       process.exit(1);
     }
 
-    // Read settings file once before the loop, apply all mutations in-memory, write once after.
-    let bulkExisting = {};
-    let bulkBody = '';
-    let bulkProjectPath = null;
+    const results = [];
 
     if (scope === 'global') {
+      let existing = {};
+      let body = '';
       try {
         const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-        bulkExisting = parseFrontmatter(text);
+        existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-        if (bodyMatch) bulkBody = bodyMatch[1];
+        if (bodyMatch) body = bodyMatch[1];
       } catch { /* new file */ }
+      for (const [key, value] of Object.entries(updates)) {
+        if (!(key in SETTINGS_DEFAULTS)) continue;
+        let parsedValue = value;
+        if (value === 'true') parsedValue = true;
+        else if (value === 'false') parsedValue = false;
+        existing[key] = parsedValue;
+        results.push({ key, value: parsedValue });
+      }
+      writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
     } else if (scope === 'project') {
-      bulkProjectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      let existing = {};
       try {
-        bulkExisting = parseSimpleYaml(fs.readFileSync(bulkProjectPath, 'utf8'));
+        existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
       } catch { /* new file */ }
-    }
-
-    const results = [];
-    for (const [key, value] of Object.entries(updates)) {
-      if (!(key in SETTINGS_DEFAULTS)) continue;
-      let parsedValue = value;
-      if (value === 'true') parsedValue = true;
-      else if (value === 'false') parsedValue = false;
-      bulkExisting[key] = parsedValue;
-      results.push({ key, value: parsedValue });
-    }
-
-    if (scope === 'global') {
-      writeFrontmatter(GLOBAL_SETTINGS_PATH, bulkExisting, bulkBody);
-    } else if (scope === 'project') {
-      const dir = path.dirname(bulkProjectPath);
+      for (const [key, value] of Object.entries(updates)) {
+        if (!(key in SETTINGS_DEFAULTS)) continue;
+        let parsedValue = value;
+        if (value === 'true') parsedValue = true;
+        else if (value === 'false') parsedValue = false;
+        existing[key] = parsedValue;
+        results.push({ key, value: parsedValue });
+      }
+      const dir = path.dirname(projectPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(bulkProjectPath, toSimpleYaml(bulkExisting));
+      fs.writeFileSync(projectPath, toSimpleYaml(existing));
     }
 
     output({ ok: true, scope, updated: results });
@@ -1341,10 +1349,9 @@ module.exports = {
     const overrides = loadModelOverrides();
     const agents = Object.keys(MODEL_PROFILES);
 
-    // Pass pre-loaded overrides and profile to avoid redundant file reads per agent.
     const effective = {};
     for (const agent of agents) {
-      const result = resolveAgentModel(agent, overrides, profile);
+      const result = resolveAgentModel(agent);
       effective[agent] = result;
     }
 
@@ -1367,7 +1374,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
+    const value = bd(`kv get ${fullKey}`, { allowFail: true });
     output({ key: fullKey, value: value || null });
   },
 
@@ -1424,7 +1431,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    bdArgs(['kv', 'clear', fullKey], { allowFail: true });
+    bd(`kv clear ${fullKey}`, { allowFail: true });
     output({ ok: true, key: fullKey, cleared: true });
   },
 
@@ -1565,7 +1572,7 @@ module.exports = {
     if (files) descParts.push(`Files: ${files}`);
     const fullDesc = descParts.filter(Boolean).join('\n');
 
-    const result = bdArgs(['create', `--title=${title}`, `--description=${fullDesc}`, '--type=task', '--priority=3', '--json']);
+    const result = bd(`create --title="${title.replace(/"/g, '\\"')}" --description="${fullDesc.replace(/"/g, '\\"')}" --type=task --priority=3 --json`);
     if (!result) {
       console.error('Failed to create todo bead');
       process.exit(1);
@@ -1751,7 +1758,7 @@ module.exports = {
   },
 
   /**
-   * Initialize a quick task workflow.
+   * Create a monorepo parent bead and child project beads for each workspace.
    */
   'monorepo-create'(args) {
     const name = args.join(' ').trim();

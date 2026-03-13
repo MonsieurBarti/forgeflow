@@ -80,8 +80,6 @@ const DEFAULT_MODEL_PROFILE = 'balanced';
 
 // --- Simple YAML Helpers ---
 
-const NUMERIC_RE = /^\d+(\.\d+)?$/;
-
 function parseSimpleYaml(text) {
   const result = {};
   let currentSection = null;
@@ -98,7 +96,7 @@ function parseSimpleYaml(text) {
       // Nested key under current section
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
-      else if (NUMERIC_RE.test(val)) val = parseFloat(val);
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
       if (typeof result[currentSection] !== 'object') result[currentSection] = {};
       result[currentSection][key] = val;
     } else if (val === '') {
@@ -109,7 +107,7 @@ function parseSimpleYaml(text) {
       currentSection = null;
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
-      else if (NUMERIC_RE.test(val)) val = parseFloat(val);
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
       result[key] = val;
     }
   }
@@ -212,16 +210,6 @@ function git(args, opts = {}) {
 }
 
 function bdJson(args) {
-  if (Array.isArray(args)) {
-    const raw = bdArgs([...args, '--json']);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      console.error('[bdJson] Parse failure for:', args, 'raw:', raw);
-      return null;
-    }
-  }
   const raw = bd(`${args} --json`);
   if (!raw) return null;
   try {
@@ -419,16 +407,13 @@ function loadModelOverrides() {
 /**
  * Resolve the effective model for an agent name.
  * Returns { model, source } where model is 'inherit'|'sonnet'|'haiku'|null
- *
- * Optional overrides and profile params allow pre-loaded values to be passed in,
- * avoiding redundant file reads when resolving many agents in a loop.
  */
-function resolveAgentModel(agentName, preloadedOverrides, preloadedProfile) {
+function resolveAgentModel(agentName) {
   // Normalize: accept both 'planner' and 'forge-planner'
   const normalized = ROLE_TO_AGENT[agentName] || agentName;
 
   // 1. Check per-agent overrides
-  const overrides = preloadedOverrides !== undefined ? preloadedOverrides : loadModelOverrides();
+  const overrides = loadModelOverrides();
   if (overrides[normalized]) {
     const raw = overrides[normalized];
     return { model: raw === 'opus' ? 'inherit' : raw, source: 'override' };
@@ -440,7 +425,7 @@ function resolveAgentModel(agentName, preloadedOverrides, preloadedProfile) {
     return { model: null, source: null };
   }
 
-  const profile = preloadedProfile !== undefined ? preloadedProfile : loadModelProfile();
+  const profile = loadModelProfile();
   const raw = profileEntry[profile];
   return {
     model: raw === 'opus' ? 'inherit' : raw,
@@ -473,6 +458,7 @@ module.exports = {
   gh,
   output,
   // Settings resolution
+  findGitRoot,
   resolveSettings,
   resolveSettingsPath,
   deepMerge,
