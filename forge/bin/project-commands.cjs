@@ -25,53 +25,58 @@ const {
 } = require('./core.cjs');
 
 /**
+ * Expand simple glob patterns (e.g., "apps/*", "packages/*") to package directories.
+ * Complex globs containing intermediate wildcards are skipped.
+ */
+function expandGlobs(patterns, root) {
+  const results = [];
+  for (const pattern of patterns) {
+    const clean = pattern.replace(/\/\*\*?$/, '').replace(/\*$/, '');
+    if (clean.includes('*')) continue; // skip complex globs
+    const dir = path.join(root, clean);
+    if (fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+      // If the pattern ended with /*, list subdirectories
+      if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory() && !entry.name.startsWith('.')) {
+              const pkgPath = path.join(clean, entry.name);
+              const pkgJsonPath = path.join(root, pkgPath, 'package.json');
+              let name = entry.name;
+              try {
+                const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+                if (pkg.name) name = pkg.name;
+              } catch { /* use dir name */ }
+              results.push({ name, path: pkgPath });
+            }
+          }
+        } catch { /* skip unreadable */ }
+      } else {
+        // Direct path (no glob)
+        const pkgJsonPath = path.join(root, clean, 'package.json');
+        let name = path.basename(clean);
+        try {
+          const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+          if (pkg.name) name = pkg.name;
+        } catch { /* use dir name */ }
+        results.push({ name, path: clean });
+      }
+    }
+  }
+  return results;
+}
+
+/**
  * Detect workspace packages from turbo.json, nx.json, or pnpm-workspace.yaml.
  * Returns { source: string, packages: Array<{ name: string, path: string }> }
  */
 function detectWorkspaces(rootDir) {
-  // Helper: expand simple glob patterns (e.g., "apps/*", "packages/*") to directories
-  function expandGlobs(patterns, root) {
-    const results = [];
-    for (const pattern of patterns) {
-      const clean = pattern.replace(/\/\*\*?$/, '').replace(/\*$/, '');
-      if (clean.includes('*')) continue; // skip complex globs
-      const dir = path.join(root, clean);
-      if (fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
-        // If the pattern ended with /*, list subdirectories
-        if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
-          try {
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
-            for (const entry of entries) {
-              if (entry.isDirectory() && !entry.name.startsWith('.')) {
-                const pkgPath = path.join(clean, entry.name);
-                const pkgJsonPath = path.join(root, pkgPath, 'package.json');
-                let name = entry.name;
-                if (fs.existsSync(pkgJsonPath)) {
-                  try {
-                    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-                    if (pkg.name) name = pkg.name;
-                  } catch { /* use dir name */ }
-                }
-                results.push({ name, path: pkgPath });
-              }
-            }
-          } catch { /* skip unreadable */ }
-        } else {
-          // Direct path (no glob)
-          const pkgJsonPath = path.join(root, clean, 'package.json');
-          let name = path.basename(clean);
-          if (fs.existsSync(pkgJsonPath)) {
-            try {
-              const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-              if (pkg.name) name = pkg.name;
-            } catch { /* use dir name */ }
-          }
-          results.push({ name, path: clean });
-        }
-      }
-    }
-    return results;
-  }
+  // Read root package.json once and reuse across all branches that need it
+  let rootPkg = null;
+  try {
+    rootPkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+  } catch { /* no root package.json */ }
 
   // Try pnpm-workspace.yaml
   const pnpmPath = path.join(rootDir, 'pnpm-workspace.yaml');
@@ -99,46 +104,28 @@ function detectWorkspaces(rootDir) {
 
   // Try turbo.json (Turborepo reads workspaces from package.json)
   const turboPath = path.join(rootDir, 'turbo.json');
-  if (fs.existsSync(turboPath)) {
-    // Turborepo uses package.json workspaces field
-    const pkgPath = path.join(rootDir, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
-        if (workspaces.length > 0) {
-          return { source: 'turbo.json+package.json', packages: expandGlobs(workspaces, rootDir) };
-        }
-      } catch { /* fall through */ }
+  if (fs.existsSync(turboPath) && rootPkg) {
+    const workspaces = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : (rootPkg.workspaces?.packages || []);
+    if (workspaces.length > 0) {
+      return { source: 'turbo.json+package.json', packages: expandGlobs(workspaces, rootDir) };
     }
   }
 
   // Try nx.json
   const nxPath = path.join(rootDir, 'nx.json');
-  if (fs.existsSync(nxPath)) {
-    // Nx uses package.json workspaces or project.json files
-    const pkgPath = path.join(rootDir, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
-        if (workspaces.length > 0) {
-          return { source: 'nx.json+package.json', packages: expandGlobs(workspaces, rootDir) };
-        }
-      } catch { /* fall through */ }
+  if (fs.existsSync(nxPath) && rootPkg) {
+    const workspaces = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : (rootPkg.workspaces?.packages || []);
+    if (workspaces.length > 0) {
+      return { source: 'nx.json+package.json', packages: expandGlobs(workspaces, rootDir) };
     }
   }
 
   // Fallback: check package.json workspaces directly (yarn/npm workspaces)
-  const rootPkgPath = path.join(rootDir, 'package.json');
-  if (fs.existsSync(rootPkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
-      const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
-      if (workspaces.length > 0) {
-        return { source: 'package.json', packages: expandGlobs(workspaces, rootDir) };
-      }
-    } catch { /* fall through */ }
+  if (rootPkg) {
+    const workspaces = Array.isArray(rootPkg.workspaces) ? rootPkg.workspaces : (rootPkg.workspaces?.packages || []);
+    if (workspaces.length > 0) {
+      return { source: 'package.json', packages: expandGlobs(workspaces, rootDir) };
+    }
   }
 
   return { source: 'none', packages: [] };
@@ -146,24 +133,32 @@ function detectWorkspaces(rootDir) {
 
 /**
  * Extract workspace_path from a forge:project bead's design field.
- * The design field stores workspace_paths as simple YAML, e.g.:
- *   workspace_paths:
- *     <project-id>: packages/app1
+ *
+ * Two storage formats are supported:
+ *   1. Nested map (monorepo parent): workspace_paths keyed by child bead ID
+ *        workspace_paths:
+ *          <bead-id>: packages/app1
+ *   2. Flat field (child project beads):
+ *        workspace_path: packages/app1
+ *
+ * Bead IDs match [a-z]+-[a-z0-9]+ and therefore never contain colons,
+ * so YAML key parsing is unambiguous.
+ *
+ * Lookup cascade: (1) keyed by bead.id in workspace_paths, (2) flat workspace_path.
+ * No sole-entry shortcut — a missing key means "not this bead's entry".
+ *
  * Returns the path string for this bead, or null if not found.
  */
 function extractWorkspacePath(bead) {
   if (!bead || !bead.design) return null;
   const parsed = parseSimpleYaml(bead.design);
   if (parsed.workspace_paths && typeof parsed.workspace_paths === 'object') {
-    // workspace_paths is keyed by project ID — look for this bead's ID
+    // workspace_paths is keyed by bead ID — look up this bead's own entry only
     if (parsed.workspace_paths[bead.id] !== undefined) {
       return String(parsed.workspace_paths[bead.id]);
     }
-    // Also check if there's only one entry (common case)
-    const values = Object.values(parsed.workspace_paths);
-    if (values.length === 1) return String(values[0]);
   }
-  // Fallback: check for a flat workspace_path field
+  // Fallback: check for a flat workspace_path field (used by child project beads)
   if (parsed.workspace_path) return String(parsed.workspace_path);
   return null;
 }
@@ -202,6 +197,56 @@ function collectProjectIssues(projectId) {
   addIssues(issues);
 
   return { milestones, phases, requirements };
+}
+
+/**
+ * Build phase detail objects for a list of phases.
+ * When includeMeta is true, also fetches description and per-task acceptance_criteria
+ * (used by generate-dashboard but not full-progress).
+ */
+function buildPhaseDetails(phases, { includeMeta = false } = {}) {
+  const details = [];
+  for (const phase of phases) {
+    const phaseChildren = bdJson(`children ${phase.id}`);
+    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const entry = {
+      id: phase.id,
+      title: phase.title,
+      status: phase.status,
+      tasks_total: tasks.length,
+      tasks_open: tasks.filter(t => t.status === 'open').length,
+      tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
+      tasks_closed: tasks.filter(t => t.status === 'closed').length,
+      tasks: includeMeta
+        ? tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' }))
+        : tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
+    };
+    if (includeMeta) entry.description = phase.description || '';
+    details.push(entry);
+  }
+  return details;
+}
+
+/**
+ * Build requirement coverage objects for a list of requirements.
+ * Returns an array of { id, title, covered, covering_tasks }.
+ */
+function getRequirementCoverage(requirements) {
+  const coverage = [];
+  for (const req of requirements) {
+    const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+    let deps = [];
+    if (depsRaw) {
+      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+    }
+    coverage.push({
+      id: req.id,
+      title: req.title,
+      covered: Array.isArray(deps) && deps.length > 0,
+      covering_tasks: Array.isArray(deps) ? deps.length : 0,
+    });
+  }
+  return coverage;
 }
 
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
@@ -453,12 +498,16 @@ module.exports = {
           const gitRoot = findGitRoot(cwd);
           if (gitRoot) {
             const relPath = path.relative(gitRoot, cwd).split(path.sep).join('/');
+            // Pre-compute workspace paths (O(N) scan is intentional at current monorepo scale)
+            const wpMap = new Map(issues.map(p => [p.id, extractWorkspacePath(p)]));
             let bestMatch = null;
             let bestLen = -1;
             for (const project of issues) {
-              const wp = extractWorkspacePath(project);
+              const wp = wpMap.get(project.id);
               if (!wp) continue;
-              const normalizedWp = wp.replace(/\/+$/, '');
+              const normalizedWp = path.normalize(wp.replace(/\/+$/, ''));
+              // Reject paths that escaped the repo root via ".."
+              if (normalizedWp.includes('..')) continue;
               // Check if relPath starts with this workspace_path
               if (relPath === normalizedWp || relPath.startsWith(normalizedWp + '/')) {
                 if (normalizedWp.length > bestLen) {
@@ -471,21 +520,26 @@ module.exports = {
               output({ found: true, project_id: bestMatch.id, project_title: bestMatch.title || bestMatch.subject, projects: issues, source: 'cwd_monorepo' });
               return;
             }
+
+            // No child matched — return forge:monorepo parent if one exists (only when inside a git repo)
+            const monoResult = bd('list --label forge:monorepo --json', { allowFail: true });
+            if (monoResult) {
+              try {
+                const monoData = JSON.parse(monoResult);
+                const monoIssues = Array.isArray(monoData) ? monoData : (monoData.issues || []);
+                if (monoIssues.length > 0) {
+                  const mono = monoIssues[0];
+                  output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
+                  return;
+                }
+              } catch { /* fall through */ }
+            }
+            // Still no match — return first project as last resort (only inside a git repo)
+            const firstProject = issues[0];
+            output({ found: true, project_id: firstProject.id, project_title: firstProject.title || firstProject.subject, projects: issues, source: 'beads' });
+            return;
           }
-          // No child matched — return forge:monorepo parent if one exists
-          const monoResult = bd('list --label forge:monorepo --json', { allowFail: true });
-          if (monoResult) {
-            try {
-              const monoData = JSON.parse(monoResult);
-              const monoIssues = Array.isArray(monoData) ? monoData : (monoData.issues || []);
-              if (monoIssues.length > 0) {
-                const mono = monoIssues[0];
-                output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
-                return;
-              }
-            } catch { /* fall through */ }
-          }
-          // Still no match — return first project as last resort
+          // Outside a git repo — skip monorepo lookup; return first project
           const project = issues[0];
           output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
           return;
@@ -597,37 +651,8 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = [];
-    for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-
-      phaseDetails.push({
-        id: phase.id,
-        title: phase.title,
-        status: phase.status,
-        tasks_total: tasks.length,
-        tasks_open: tasks.filter(t => t.status === 'open').length,
-        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
-        tasks_closed: tasks.filter(t => t.status === 'closed').length,
-        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
-      });
-    }
-
-    const reqCoverage = [];
-    for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
-      let deps = [];
-      if (depsRaw) {
-        try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
-      }
-      reqCoverage.push({
-        id: req.id,
-        title: req.title,
-        covered: Array.isArray(deps) && deps.length > 0,
-        covering_tasks: Array.isArray(deps) ? deps.length : 0,
-      });
-    }
+    const phaseDetails = buildPhaseDetails(phases);
+    const reqCoverage = getRequirementCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -668,40 +693,14 @@ module.exports = {
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phaseDetails = [];
-    for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
-      phaseDetails.push({
-        id: phase.id,
-        title: phase.title,
-        description: phase.description || '',
-        status: phase.status,
-        tasks_total: tasks.length,
-        tasks_open: tasks.filter(t => t.status === 'open').length,
-        tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
-        tasks_closed: tasks.filter(t => t.status === 'closed').length,
-        tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' })),
-      });
-    }
+    const phaseDetails = buildPhaseDetails(phases, { includeMeta: true });
 
     for (const pd of phaseDetails) {
       pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
     }
     phaseDetails.sort((a, b) => a._sortKey - b._sortKey);
 
-    const reqCoverage = [];
-    for (const req of requirements) {
-      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
-      let deps = [];
-      if (depsRaw) { try { deps = JSON.parse(depsRaw); } catch { /* ignore */ } }
-      reqCoverage.push({
-        id: req.id,
-        title: req.title,
-        covered: Array.isArray(deps) && deps.length > 0,
-        covering_tasks: Array.isArray(deps) ? deps.length : 0,
-      });
-    }
+    const reqCoverage = getRequirementCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -1826,16 +1825,8 @@ module.exports = {
 
     bd(`label add ${created.id} forge:monorepo`);
 
-    // Store workspace paths in design field as YAML
-    if (detected.packages.length > 0) {
-      const yamlLines = ['workspace_paths:'];
-      for (const pkg of detected.packages) {
-        yamlLines.push(`  ${pkg.name}: ${pkg.path}`);
-      }
-      bdArgs(['update', created.id, `--design=${yamlLines.join('\n')}`]);
-    }
-
     // 3. Create child forge:project beads for each detected package
+    // Children use flat workspace_path; the parent's workspace_paths map uses child bead IDs as keys.
     const children = [];
     for (const pkg of detected.packages) {
       const childRaw = bdArgs(['create', `--title=${pkg.name}`, '--type=epic', '--priority=2', '--json']);
@@ -1845,8 +1836,20 @@ module.exports = {
 
       bd(`label add ${child.id} forge:project`);
       bd(`dep add ${child.id} ${created.id} --type=parent-child`);
+      // Child stores a flat workspace_path for direct lookup via extractWorkspacePath
       bdArgs(['update', child.id, `--design=workspace_path: ${pkg.path}`]);
       children.push({ id: child.id, name: pkg.name, path: pkg.path });
+    }
+
+    // Store workspace paths in the parent's design field keyed by child bead ID
+    // so that extractWorkspacePath(parentBead) can resolve correctly when called
+    // with a bead whose ID matches a child's ID.
+    if (children.length > 0) {
+      const yamlLines = ['workspace_paths:'];
+      for (const child of children) {
+        yamlLines.push(`  ${child.id}: ${child.path}`);
+      }
+      bdArgs(['update', created.id, `--design=${yamlLines.join('\n')}`]);
     }
 
     output({
