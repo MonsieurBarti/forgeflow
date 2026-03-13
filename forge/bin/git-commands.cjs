@@ -160,7 +160,7 @@ module.exports = {
       const taskDepList = Array.isArray(taskDeps) ? taskDeps : (taskDeps?.dependencies || []);
       const validates = taskDepList.filter(d => d.dependency_type === 'validates');
       for (const v of validates) {
-        reqCoverage.push({ taskId: task.id, taskTitle: task.title, reqId: v.depends_on_id });
+        reqCoverage.push({ taskId: task.id, taskTitle: task.title, reqId: v.id });
       }
     }
 
@@ -192,11 +192,11 @@ module.exports = {
 
     let milestoneId = null;
     if (parentDep) {
-      const parentRaw = bdJson(`show ${parentDep.depends_on_id}`);
+      const parentRaw = bdJson(`show ${parentDep.id}`);
       const parent = Array.isArray(parentRaw) ? parentRaw[0] : parentRaw;
       const parentLabels = parent?.labels || [];
       if (parentLabels.includes('forge:milestone')) {
-        milestoneId = parentDep.depends_on_id;
+        milestoneId = parentDep.id;
       }
     }
 

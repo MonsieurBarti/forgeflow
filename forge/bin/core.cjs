@@ -7,6 +7,7 @@
  * Exports: parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
  *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJson, git, gh,
  *          output, resolveAgentModel, loadModelProfile, loadModelOverrides,
+ *          findGitRoot, resolveSettings, resolveSettingsPath, deepMerge,
  *          and all constants.
  */
 
@@ -80,7 +81,8 @@ const DEFAULT_MODEL_PROFILE = 'balanced';
 
 // --- Simple YAML Helpers ---
 
-const NUMERIC_RE = /^\d+(\.\d+)?$/;
+// Keys that must never be assigned to avoid prototype pollution
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function parseSimpleYaml(text) {
   const result = {};
@@ -92,13 +94,15 @@ function parseSimpleYaml(text) {
     const colonIdx = trimmed.indexOf(':');
     if (colonIdx === -1) continue;
     const key = trimmed.slice(0, colonIdx).trim();
+    if (FORBIDDEN_KEYS.has(key)) continue;
     let val = trimmed.slice(colonIdx + 1).trim();
 
     if (indent > 0 && currentSection) {
       // Nested key under current section
+      if (FORBIDDEN_KEYS.has(key)) continue;
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
-      else if (NUMERIC_RE.test(val)) val = parseFloat(val);
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
       if (typeof result[currentSection] !== 'object') result[currentSection] = {};
       result[currentSection][key] = val;
     } else if (val === '') {
@@ -109,7 +113,7 @@ function parseSimpleYaml(text) {
       currentSection = null;
       if (val === 'true') val = true;
       else if (val === 'false') val = false;
-      else if (NUMERIC_RE.test(val)) val = parseFloat(val);
+      else if (/^\d+(\.\d+)?$/.test(val)) val = parseFloat(val);
       result[key] = val;
     }
   }
@@ -212,16 +216,6 @@ function git(args, opts = {}) {
 }
 
 function bdJson(args) {
-  if (Array.isArray(args)) {
-    const raw = bdArgs([...args, '--json']);
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      console.error('[bdJson] Parse failure for:', args, 'raw:', raw);
-      return null;
-    }
-  }
   const raw = bd(`${args} --json`);
   if (!raw) return null;
   try {
@@ -258,20 +252,36 @@ function output(data) {
 
 // --- Settings Resolution ---
 
+// Module-level cache for findGitRoot results, keyed by normalized `from` path
+const _gitRootCache = new Map();
+
+// Module-level cache for resolveSettings results, keyed by normalized cwd
+const _settingsCache = new Map();
+
 /**
  * Find the git repository root from a given directory.
+ * Results are memoized per normalized path to avoid redundant subprocess spawns.
  */
 function findGitRoot(from) {
+  const key = path.normalize(from || process.cwd());
+  if (_gitRootCache.has(key)) return _gitRootCache.get(key);
+  let result = null;
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    result = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       timeout: 5000,
-      cwd: from,
+      cwd: key,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-  } catch {
-    return null;
+  } catch (err) {
+    // status 128 means not a git repo — expected; other errors are surprising
+    if (err.status !== 128) {
+      console.warn(`[findGitRoot] unexpected git error (status ${err.status}) for path "${key}"`);
+    }
+    result = null;
   }
+  _gitRootCache.set(key, result);
+  return result;
 }
 
 /**
@@ -304,7 +314,7 @@ function resolveSettingsPath(cwd, gitRoot) {
 
   // Walk from cwd up to (but not including) git root
   let dir = normalCwd;
-  while (dir !== normalRoot && dir.startsWith(normalRoot + path.sep)) {
+  while (dir.startsWith(normalRoot + path.sep)) {
     const candidate = path.join(dir, PROJECT_SETTINGS_NAME);
     if (fs.existsSync(candidate)) return candidate;
     dir = path.dirname(dir);
@@ -322,6 +332,8 @@ function resolveSettingsPath(cwd, gitRoot) {
  */
 function resolveSettings(cwd) {
   const effectiveCwd = cwd || process.cwd();
+  const cacheKey = path.normalize(effectiveCwd);
+  if (_settingsCache.has(cacheKey)) return _settingsCache.get(cacheKey);
   const gitRoot = findGitRoot(effectiveCwd);
 
   // Start with defaults
@@ -346,6 +358,7 @@ function resolveSettings(cwd) {
     } catch { /* unreadable app settings */ }
   }
 
+  _settingsCache.set(cacheKey, settings);
   return settings;
 }
 
@@ -419,16 +432,13 @@ function loadModelOverrides() {
 /**
  * Resolve the effective model for an agent name.
  * Returns { model, source } where model is 'inherit'|'sonnet'|'haiku'|null
- *
- * Optional overrides and profile params allow pre-loaded values to be passed in,
- * avoiding redundant file reads when resolving many agents in a loop.
  */
-function resolveAgentModel(agentName, preloadedOverrides, preloadedProfile) {
+function resolveAgentModel(agentName) {
   // Normalize: accept both 'planner' and 'forge-planner'
   const normalized = ROLE_TO_AGENT[agentName] || agentName;
 
   // 1. Check per-agent overrides
-  const overrides = preloadedOverrides !== undefined ? preloadedOverrides : loadModelOverrides();
+  const overrides = loadModelOverrides();
   if (overrides[normalized]) {
     const raw = overrides[normalized];
     return { model: raw === 'opus' ? 'inherit' : raw, source: 'override' };
@@ -440,7 +450,7 @@ function resolveAgentModel(agentName, preloadedOverrides, preloadedProfile) {
     return { model: null, source: null };
   }
 
-  const profile = preloadedProfile !== undefined ? preloadedProfile : loadModelProfile();
+  const profile = loadModelProfile();
   const raw = profileEntry[profile];
   return {
     model: raw === 'opus' ? 'inherit' : raw,
@@ -473,6 +483,7 @@ module.exports = {
   gh,
   output,
   // Settings resolution
+  findGitRoot,
   resolveSettings,
   resolveSettingsPath,
   deepMerge,

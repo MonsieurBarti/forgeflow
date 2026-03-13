@@ -219,43 +219,7 @@ Automated fixes from pre-PR quality audit (security, code review, performance)."
 - If the user skips all findings (approves none), proceed to step 5.5 normally with no
   additional commits.
 
-## 5.5. Push Branch and Create Pull Request
-<!-- Note: step 5.5 continues the 5.x sub-step series after 5.1 (retrospective) and 5.2 (quality gate) -->
-
-After the phase is closed (all tasks verified), push the phase branch and open a PR for
-user review. Forge NEVER merges — the user reviews, approves, and merges the PR themselves.
-
-First, determine the current branch name (should be `forge/m<milestone-id>/phase-<phase-id>`
-or `forge/phase-<phase-id>` if no milestone):
-```bash
-BRANCH=$(git branch --show-current)
-```
-
-Push the branch to origin:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push "$BRANCH"
-```
-
-If the branch push fails because no commits exist on it (nothing was changed), skip PR
-creation and note this to the user.
-
-Create the pull request with a rich description:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" pr-create <phase-id>
-```
-
-This creates a PR against the default base branch. The PR description is auto-generated
-with the phase goal, task details, and requirement coverage. The user will review, approve,
-and merge the PR at their discretion.
-
-If the PR already exists (re-run scenario), `pr-create` will report the existing PR URL
-gracefully without creating a duplicate.
-
-Display the PR URL to the user and remind them:
-> The PR is ready for your review. Forge does not merge — please review, approve, and merge
-> when satisfied. Run `/forge:plan <next-phase>` to continue planning while the PR is open.
-
-## 6. Requirement Coverage Check
+## 5.5. Requirement Coverage Check
 
 Identify the parent milestone for this phase:
 ```bash
@@ -299,6 +263,42 @@ Or run /forge:audit-milestone to check full milestone coverage.
 ```
 
 If all reqs are covered by this phase's tasks, or if no milestone/reqs exist, show nothing.
+
+## 6. Push Branch and Create Pull Request
+
+After the phase is closed (all tasks verified) and requirement coverage is checked, push
+the phase branch and open a PR for user review. Forge NEVER merges — the user reviews,
+approves, and merges the PR themselves.
+
+First, determine the current branch name (should be `forge/m<milestone-id>/phase-<phase-id>`
+or `forge/phase-<phase-id>` if no milestone):
+```bash
+BRANCH=$(git branch --show-current)
+```
+
+Push the branch to origin:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push "$BRANCH"
+```
+
+If the branch push fails because no commits exist on it (nothing was changed), skip PR
+creation and note this to the user.
+
+Create the pull request with a rich description:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" pr-create <phase-id>
+```
+
+This creates a PR against the default base branch. The PR description is auto-generated
+with the phase goal, task details, and requirement coverage. The user will review, approve,
+and merge the PR at their discretion.
+
+If the PR already exists (re-run scenario), `pr-create` will report the existing PR URL
+gracefully without creating a duplicate.
+
+Display the PR URL to the user and remind them:
+> The PR is ready for your review. Forge does not merge — please review, approve, and merge
+> when satisfied. Run `/forge:plan <next-phase>` to continue planning while the PR is open.
 
 Suggest next step: `/forge:plan <next-phase>` or `/forge:progress`.
 
