@@ -8,7 +8,7 @@
  *           settings-bulk, resolve-model, model-for-role, model-profiles,
  *           config-get, config-set, config-list, config-clear, health,
  *           debug-list, debug-create, debug-update, todo-list, todo-create,
- *           milestone-list, milestone-audit, milestone-create, remember, init-quick
+ *           milestone-list, milestone-audit, milestone-create, monorepo-create, remember, init-quick
  */
 
 const fs = require('fs');
@@ -21,6 +21,127 @@ const {
   parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
   resolveAgentModel, loadModelProfile, loadModelOverrides,
 } = require('./core.cjs');
+
+/**
+ * Detect workspace packages from turbo.json, nx.json, or pnpm-workspace.yaml.
+ * Returns { source: string, packages: Array<{ name: string, path: string }> }
+ */
+function detectWorkspaces(rootDir) {
+  // Helper: expand simple glob patterns (e.g., "apps/*", "packages/*") to directories
+  function expandGlobs(patterns, root) {
+    const results = [];
+    for (const pattern of patterns) {
+      const clean = pattern.replace(/\/\*\*?$/, '').replace(/\*$/, '');
+      if (clean.includes('*')) continue; // skip complex globs
+      const dir = path.join(root, clean);
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        // If the pattern ended with /*, list subdirectories
+        if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                const pkgPath = path.join(clean, entry.name);
+                const pkgJsonPath = path.join(root, pkgPath, 'package.json');
+                let name = entry.name;
+                if (fs.existsSync(pkgJsonPath)) {
+                  try {
+                    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+                    if (pkg.name) name = pkg.name;
+                  } catch { /* use dir name */ }
+                }
+                results.push({ name, path: pkgPath });
+              }
+            }
+          } catch { /* skip unreadable */ }
+        } else {
+          // Direct path (no glob)
+          const pkgJsonPath = path.join(root, clean, 'package.json');
+          let name = path.basename(clean);
+          if (fs.existsSync(pkgJsonPath)) {
+            try {
+              const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+              if (pkg.name) name = pkg.name;
+            } catch { /* use dir name */ }
+          }
+          results.push({ name, path: clean });
+        }
+      }
+    }
+    return results;
+  }
+
+  // Try pnpm-workspace.yaml
+  const pnpmPath = path.join(rootDir, 'pnpm-workspace.yaml');
+  if (fs.existsSync(pnpmPath)) {
+    try {
+      const raw = fs.readFileSync(pnpmPath, 'utf8');
+      const parsed = parseSimpleYaml(raw);
+      // pnpm-workspace.yaml has: packages: ["apps/*", "packages/*"]
+      // parseSimpleYaml may not handle arrays well, so parse manually
+      const patterns = [];
+      const lines = raw.split('\n');
+      let inPackages = false;
+      for (const line of lines) {
+        if (/^packages\s*:/.test(line)) { inPackages = true; continue; }
+        if (inPackages) {
+          const m = line.match(/^\s*-\s*['"]?([^'"]+)['"]?\s*$/);
+          if (m) patterns.push(m[1].trim());
+          else if (line.trim() && !line.startsWith(' ') && !line.startsWith('\t')) break;
+        }
+      }
+      if (patterns.length > 0) {
+        return { source: 'pnpm-workspace.yaml', packages: expandGlobs(patterns, rootDir) };
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Try turbo.json (Turborepo reads workspaces from package.json)
+  const turboPath = path.join(rootDir, 'turbo.json');
+  if (fs.existsSync(turboPath)) {
+    // Turborepo uses package.json workspaces field
+    const pkgPath = path.join(rootDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
+        if (workspaces.length > 0) {
+          return { source: 'turbo.json+package.json', packages: expandGlobs(workspaces, rootDir) };
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
+  // Try nx.json
+  const nxPath = path.join(rootDir, 'nx.json');
+  if (fs.existsSync(nxPath)) {
+    // Nx uses package.json workspaces or project.json files
+    const pkgPath = path.join(rootDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
+        if (workspaces.length > 0) {
+          return { source: 'nx.json+package.json', packages: expandGlobs(workspaces, rootDir) };
+        }
+      } catch { /* fall through */ }
+    }
+  }
+
+  // Fallback: check package.json workspaces directly (yarn/npm workspaces)
+  const rootPkgPath = path.join(rootDir, 'package.json');
+  if (fs.existsSync(rootPkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
+      const workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces?.packages || []);
+      if (workspaces.length > 0) {
+        return { source: 'package.json', packages: expandGlobs(workspaces, rootDir) };
+      }
+    } catch { /* fall through */ }
+  }
+
+  return { source: 'none', packages: [] };
+}
 
 /**
  * Collect all phases and requirements for a project, traversing milestones.
@@ -1599,6 +1720,61 @@ module.exports = {
   /**
    * Initialize a quick task workflow.
    */
+  'monorepo-create'(args) {
+    const name = args.join(' ').trim();
+    if (!name) {
+      console.error('Usage: forge-tools monorepo-create <monorepo-name>');
+      process.exit(1);
+    }
+
+    // 1. Detect workspace packages
+    const rootDir = process.cwd();
+    const detected = detectWorkspaces(rootDir);
+
+    // 2. Create monorepo parent bead
+    const title = name;
+    const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
+    let created;
+    try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
+    if (!created || !created.id) {
+      console.error('Failed to create monorepo bead');
+      process.exit(1);
+    }
+
+    bd(`label add ${created.id} forge:monorepo`);
+
+    // Store workspace paths in design field as YAML
+    if (detected.packages.length > 0) {
+      const yamlLines = ['workspace_paths:'];
+      for (const pkg of detected.packages) {
+        yamlLines.push(`  ${pkg.name}: ${pkg.path}`);
+      }
+      bdArgs(['update', created.id, `--design=${yamlLines.join('\n')}`]);
+    }
+
+    // 3. Create child forge:project beads for each detected package
+    const children = [];
+    for (const pkg of detected.packages) {
+      const childRaw = bdArgs(['create', `--title=${pkg.name}`, '--type=epic', '--priority=2', '--json']);
+      let child;
+      try { child = JSON.parse(childRaw); if (Array.isArray(child)) child = child[0]; } catch { child = null; }
+      if (!child || !child.id) continue;
+
+      bd(`label add ${child.id} forge:project`);
+      bd(`dep add ${child.id} ${created.id} --type=parent-child`);
+      bdArgs(['update', child.id, `--design=workspace_path: ${pkg.path}`]);
+      children.push({ id: child.id, name: pkg.name, path: pkg.path });
+    }
+
+    output({
+      ok: true,
+      monorepo_id: created.id,
+      title,
+      detection_source: detected.source,
+      children,
+    });
+  },
+
   'init-quick'(args) {
     const description = args.join(' ').trim() || null;
 
