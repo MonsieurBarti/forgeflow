@@ -139,13 +139,26 @@ Save the vision as a memory:
 bd remember --key "forge:project:<id>:vision" "<one-line vision>"
 ```
 
-## 4. Create Default Milestone
+## 4. Gather Milestone Goals
 
-Create a default milestone as a child of the project so that phases have a milestone to attach to:
+The first milestone captures the user's v1 vision. Reuse answers from step 2 to pre-fill:
+
+- **Milestone name**: Derive from the v1 scope (e.g., "v1.0 — Core MVP"). Ask the user to
+  confirm or rename via AskUserQuestion.
+- **Goal**: Synthesize from the v1 answer in step 2.
+- **Definition of done**: What does "shipped" look like for this milestone?
+
+If the user already described v1 clearly enough in step 2, confirm rather than re-ask:
+- header: "First Milestone"
+- question: "I'll create your first milestone from the v1 scope you described. Sound good, or would you like to adjust the name/goal?"
+- options: "Looks good" / "Let me adjust"
+
+## 5. Create Milestone Epic
 
 ```bash
-bd create --title="Milestone 1" \
-  --description="Initial milestone for the project. Covers the first set of phases toward v1." \
+bd create --title="Milestone: <milestone name>" \
+  --description="<goal synthesized from v1 answers>" \
+  --design="<scope, constraints, and definition of done>" \
   --type=epic --priority=1 --json
 ```
 
@@ -155,12 +168,28 @@ bd label add <milestone-id> forge:milestone
 bd dep add <milestone-id> <project-id> --type=parent-child
 ```
 
-Save for future reference:
+Save milestone goal and session reference:
 ```bash
+bd remember --key "forge:milestone:<milestone-id>:goal" "<one-line goal>"
 bd remember --key "forge:session:last-milestone" "<milestone-id>"
 ```
 
-## 5. Define Requirements
+### 5b. Create Worktree
+
+Create a git worktree for this milestone so phase work is isolated:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create <milestone-id>
+```
+
+If the worktree already exists, treat this as success, not an error.
+
+Get the worktree path and store it:
+```bash
+WORKTREE_PATH=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-path <milestone-id>)
+bd remember --key "forge:milestone:<milestone-id>:worktree" "$WORKTREE_PATH"
+```
+
+## 6. Define Requirements
 
 Based on the user's v1 description, break it down into 5-12 concrete requirements.
 
@@ -180,11 +209,40 @@ bd search "<requirement title>" --label forge:req --status all --json
 bd create --title="<requirement title>" \
   --description="<what this requirement means and why it matters>" \
   --type=feature --priority=<1-3> --json
-bd dep add <req-id> <project-id> --type=parent-child
+bd dep add <req-id> <milestone-id> --type=parent-child
 bd label add <req-id> forge:req
 ```
 
-## 6. Create Phased Roadmap
+## 7. Research Decision (Optional)
+
+Use AskUserQuestion:
+- header: "Research"
+- question: "Research the domain ecosystem before creating the roadmap?"
+- options:
+  - "Research first (Recommended for new capabilities)"
+  - "Skip research (go straight to roadmap)"
+
+**If "Research first":**
+
+Resolve the model for the researcher agent:
+```bash
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-researcher --raw)
+```
+
+Spawn 2-4 parallel **forge-researcher** agents covering:
+- Stack/library choices for new capabilities
+- Feature patterns and best practices
+- Architecture integration with existing codebase
+- Common pitfalls
+
+Record key findings as notes on the milestone bead:
+```bash
+bd update <milestone-id> --notes="Research findings: <key points>"
+```
+
+**If "Skip research":** Continue to step 8.
+
+## 8. Create Phased Roadmap
 
 Resolve the model for the roadmapper agent:
 ```bash
@@ -192,7 +250,7 @@ MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-roadm
 ```
 
 Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if non-empty):
-- The project ID, milestone ID (Milestone 1), and vision
+- The project ID, milestone ID, and milestone goal
 - All requirement IDs with their titles and descriptions
 - Any user-specified constraints on ordering
 
@@ -200,30 +258,16 @@ The roadmapper will analyze requirements and propose 3-8 phases.
 
 Present the proposed phases to the user for review. Let them reorder, merge, split, or rename phases. Iterate until they approve.
 
-Then create the approved phases. For each phase, check if a bead with the same title already exists before creating:
+Then create the approved phases using forge-tools:
 ```bash
-# Check for existing bead with this title (label forge:phase)
-bd search "<Phase N: phase name>" --label forge:phase --status all --json
+# Use forge-tools for each phase (handles numbering, validation, and wiring):
+node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <milestone-id> <phase-description>
 ```
 
-- If a match with the exact title is found: skip creation, note "Skipping '<title>' — already exists as <id>", and use the existing ID for dependency wiring.
-- If no match: create normally.
+This automatically wires each phase as a child of the milestone (parent-child dependency).
+No separate wiring step needed.
 
-```bash
-# Only run if no existing match:
-bd create --title="Phase N: <phase name>" \
-  --description="<phase goal and what it achieves>" \
-  --type=epic --priority=1 --json
-bd dep add <phase-id> <milestone-id> --type=parent-child
-bd label add <phase-id> forge:phase
-
-# Wire phase ordering (each phase blocks the next):
-bd dep add <phase-2-id> <phase-1-id>  # phase 2 depends on phase 1
-bd dep add <phase-3-id> <phase-2-id>  # phase 3 depends on phase 2
-# etc.
-```
-
-## 7. Show Roadmap
+## 9. Show Summary
 
 Display the full project structure:
 ```bash
@@ -232,9 +276,9 @@ bd dep tree <project-id>
 
 Summarize:
 - Project vision (one sentence)
-- Default milestone created (Milestone 1)
+- Milestone goal (one sentence)
 - N requirements defined
-- N phases planned under Milestone 1
+- N phases planned under the milestone
 - Phase overview (numbered list with titles)
 - Next step: `/forge:plan` to plan the first phase
 
