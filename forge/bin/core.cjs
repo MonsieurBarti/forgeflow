@@ -248,6 +248,99 @@ function output(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
 
+// --- Settings Resolution ---
+
+/**
+ * Find the git repository root from a given directory.
+ */
+function findGitRoot(from) {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      cwd: from,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deep-merge source into target (mutates target). Source values win.
+ * Objects are merged recursively; primitives and arrays are replaced.
+ */
+function deepMerge(target, source) {
+  for (const key of Object.keys(source)) {
+    if (
+      source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) &&
+      target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])
+    ) {
+      deepMerge(target[key], source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+
+/**
+ * Resolve the path to the nearest app-level .forge/settings.yaml between cwd
+ * and the git root. Returns null if cwd is the git root or no app settings exist.
+ */
+function resolveSettingsPath(cwd, gitRoot) {
+  if (!cwd || !gitRoot) return null;
+  const normalCwd = path.resolve(cwd);
+  const normalRoot = path.resolve(gitRoot);
+  if (normalCwd === normalRoot) return null;
+
+  // Walk from cwd up to (but not including) git root
+  let dir = normalCwd;
+  while (dir !== normalRoot && dir.startsWith(normalRoot + path.sep)) {
+    const candidate = path.join(dir, PROJECT_SETTINGS_NAME);
+    if (fs.existsSync(candidate)) return candidate;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/**
+ * Resolve settings with cascading merge:
+ *   1. SETTINGS_DEFAULTS as base
+ *   2. git-root/.forge/settings.yaml merged over defaults
+ *   3. app-level .forge/settings.yaml (if cwd is inside a workspace app) merged over root
+ *
+ * Returns the merged settings object.
+ */
+function resolveSettings(cwd) {
+  const effectiveCwd = cwd || process.cwd();
+  const gitRoot = findGitRoot(effectiveCwd);
+
+  // Start with defaults
+  const settings = { ...SETTINGS_DEFAULTS };
+
+  if (!gitRoot) return settings;
+
+  // Layer 1: root settings
+  const rootSettingsPath = path.join(gitRoot, PROJECT_SETTINGS_NAME);
+  let rootSettings = {};
+  try {
+    rootSettings = parseSimpleYaml(fs.readFileSync(rootSettingsPath, 'utf8'));
+  } catch { /* no root settings */ }
+  deepMerge(settings, rootSettings);
+
+  // Layer 2: app-level settings (only if cwd differs from git root)
+  const appSettingsPath = resolveSettingsPath(effectiveCwd, gitRoot);
+  if (appSettingsPath) {
+    try {
+      const appSettings = parseSimpleYaml(fs.readFileSync(appSettingsPath, 'utf8'));
+      deepMerge(settings, appSettings);
+    } catch { /* unreadable app settings */ }
+  }
+
+  return settings;
+}
+
 // --- Model Resolution ---
 
 /**
@@ -361,6 +454,10 @@ module.exports = {
   git,
   gh,
   output,
+  // Settings resolution
+  resolveSettings,
+  resolveSettingsPath,
+  deepMerge,
   // Model resolution
   loadModelProfile,
   loadModelOverrides,
