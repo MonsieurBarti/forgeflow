@@ -103,6 +103,14 @@ bd label add $QUICK_ID forge:quick
 bd update $QUICK_ID --status=in_progress
 ```
 
+**Create branch for the quick task:**
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-branch-create $QUICK_ID
+```
+
+Verify the branch was created/checked out. If branch creation fails, warn but continue
+(the task can still work on the current branch).
+
 Report: `Created quick task: ${QUICK_ID} -- ${DESCRIPTION}`
 
 ---
@@ -303,7 +311,11 @@ Instructions:
 1. Claim the task: bd update <task-id> --status=in_progress
 2. Implement the task following the description and acceptance criteria
 3. Run relevant tests to verify acceptance criteria are met
-4. Create an atomic git commit with a descriptive message
+4. Verify you are on the forge/quick-${QUICK_ID} branch before committing.
+   Create an atomic git commit with a standardized message:
+   Format: feat(quick-${QUICK_ID}): <summary> [task <task-id>]
+   Use git add <specific files> -- never git add . or git add -A
+   NEVER run git merge or gh pr merge -- merging is always left to the user
 5. Close the task: bd close <task-id> --reason='<brief summary>'
 
 If you encounter a blocker:
@@ -364,6 +376,50 @@ Read verification status from bead notes.
 
 ---
 
+**Step 7.5: Quality gate, push branch, and create PR**
+
+This step runs after verification (or after execution if `$FULL_MODE` is false).
+Skip this step if any tasks remain open or blocked.
+
+**Check the quality_gate setting:**
+
+```bash
+SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
+```
+
+Parse the result and read the `quality_gate` value.
+
+- If `quality_gate` is `false`, skip the quality gate silently — proceed to push/PR.
+- If `quality_gate` is `true` (or not explicitly set to false), run the quality gate pipeline:
+
+**Scope changed files:**
+```bash
+CHANGED_FILES=$(git diff main...HEAD --name-only)
+```
+
+If no files were changed, skip the quality gate silently.
+
+If files were changed, follow the quality-gate workflow defined in
+`@~/.claude/forge/workflows/quality-gate.md`, passing the list of changed files as scope.
+If the user approves fixes and changes are applied, commit them before proceeding.
+
+**Push branch and create PR:**
+
+```bash
+BRANCH=$(git branch --show-current)
+node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push $BRANCH
+```
+
+```bash
+PR_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-pr-create $QUICK_ID)
+```
+
+Parse `PR_RESULT` JSON. If `url` is present, store as `$PR_URL` and display to user.
+Best-effort: if PR creation fails (no `url`, or `error` field present), warn and continue
+to close. The code is on the branch either way.
+
+---
+
 **Step 8: Close quick task and report**
 
 Close the quick task bead:
@@ -387,6 +443,7 @@ FORGE > QUICK TASK COMPLETE (FULL MODE)
 Quick Task: ${QUICK_ID} -- ${DESCRIPTION}
 Verification: ${VERIFICATION_STATUS}
 Commit: ${COMMIT}
+${PR_URL ? 'PR: ${PR_URL}' : ''}
 
 ---
 
@@ -401,6 +458,7 @@ FORGE > QUICK TASK COMPLETE
 
 Quick Task: ${QUICK_ID} -- ${DESCRIPTION}
 Commit: ${COMMIT}
+${PR_URL ? 'PR: ${PR_URL}' : ''}
 
 ---
 
@@ -414,10 +472,15 @@ Ready for next task: /forge:quick
 - [ ] User provides task description (or prompted interactively)
 - [ ] `--full` and `--discuss` flags parsed from arguments when present
 - [ ] Quick task bead created with `forge:quick` label and parent-child dep to project
+- [ ] Branch forge/quick-<id> created after bead creation
 - [ ] (--discuss) Gray areas identified and presented, decisions captured in bead notes
 - [ ] 1-3 task beads created by planner with forge:task label, parent-child to quick bead
 - [ ] (--full) Plan checker validates plan, revision loop capped at 2
-- [ ] All tasks executed with atomic commits
+- [ ] All tasks executed with atomic commits using feat(quick-<id>): format
+- [ ] Executor verifies branch before committing, uses git add <specific files>
 - [ ] (--full) Verification run and status recorded
+- [ ] Quality gate runs when quality_gate setting is true, skipped when false
+- [ ] Branch pushed and PR created (best-effort — warn on failure, do not block close)
+- [ ] PR URL displayed in completion report when available
 - [ ] Quick task bead closed with completion reason
 </success_criteria>
