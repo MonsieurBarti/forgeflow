@@ -128,6 +128,22 @@ Requirements: N/M satisfied
 
 Record unsatisfied requirements as known gaps in the retrospective.
 
+**Auto-close satisfied requirements:**
+
+For each open forge:req bead under the milestone that has `validates` links:
+
+```bash
+bd dep list <req-id> --type validates --json
+```
+
+If ALL validating tasks have `status == "closed"`, close the requirement:
+
+```bash
+bd close <req-id> --reason="All validating tasks completed"
+```
+
+Report any auto-closed requirements alongside the coverage summary.
+
 ## 6. Generate Retrospective
 
 Compile the milestone retrospective and store it in the bead:

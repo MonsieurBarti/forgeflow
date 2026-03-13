@@ -330,6 +330,30 @@ Or run /forge:audit-milestone to check full milestone coverage.
 
 If all reqs are covered by this phase's tasks, or if no milestone/reqs exist, show nothing.
 
+**Auto-close satisfied requirements:**
+
+After the coverage check, iterate over ALL forge:req beads under the milestone (not just those
+covered by this phase). For each open requirement:
+
+```bash
+bd dep list <req-id> --type validates --json
+```
+
+If the requirement has at least one `validates` link AND every validating task has `status == "closed"`,
+close the requirement automatically:
+
+```bash
+bd close <req-id> --reason="All validating tasks completed"
+```
+
+If any requirements were auto-closed, report them:
+```
+Auto-closed satisfied requirements:
+  - <req-title> (<req-id>)
+```
+
+Skip requirements that have no `validates` links (they can't be verified as satisfied).
+
 ## 10. Push Branch and Create Pull Request
 
 After the phase is closed (all tasks verified) and requirement coverage is checked, push
