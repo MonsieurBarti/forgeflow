@@ -163,6 +163,61 @@ Automated fixes from pre-PR quality audit (security, code review, performance)."
 - If the user skips all findings (approves none), proceed to step 9 normally with no
   additional commits.
 
+## 7. Re-verify After Quality Gate
+
+This step runs only when the phase is being closed (all tasks verified or --force override).
+Skip this step if closure was blocked.
+
+**Check whether quality gate produced new commits:**
+
+Compare `HEAD` after Step 6 completes with the commit SHA recorded before Step 6 began.
+If the quality gate was skipped (setting disabled or no changed files), skip this step as well.
+
+```bash
+POST_QG_SHA=$(git rev-parse HEAD)
+```
+
+- If `POST_QG_SHA` equals the SHA before Step 6 (no new commits from quality gate):
+  Log `"No quality gate changes — skipping re-verification."` and proceed to Step 8.
+
+- If `POST_QG_SHA` differs (quality gate produced fix commits): run re-verification below.
+
+**Re-run full automated verification:**
+
+Re-run the same automated verification from Step 3 on ALL tasks (not just tasks affected by
+the quality gate changes). This ensures the quality gate fixes did not break any acceptance
+criteria.
+
+Resolve the model for the verifier agent:
+```bash
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-verifier --raw)
+```
+
+For phases with multiple tasks, spawn a **forge-verifier** agent (with `model` if non-empty)
+to handle parallel re-verification. For single-task phases, verify inline.
+
+Record re-verification results as comments:
+```bash
+bd comments add <task-id> "Re-verification (post quality gate): <PASS|FAIL> - <details>"
+```
+
+**Re-run UAT for newly failed tasks:**
+
+Compare the re-verification results with the original Step 3 results. For any task that
+**passed** in Step 3 but **failed** in re-verification (regression introduced by quality
+gate fixes), re-run UAT (Step 4 logic) for those tasks only.
+
+If no tasks newly failed, skip UAT re-run.
+
+**Apply hard gate on re-verification failures:**
+
+If any tasks fail re-verification, apply the same hard gate from Step 5:
+- Do NOT close those tasks or the phase (unless `--force` was passed)
+- Output the blocking message from Step 5 with the re-verification failures
+- Suggest fixing the quality gate regressions and re-running `/forge:verify <phase>`
+
+If all tasks pass re-verification, proceed to Step 8.
+
 ## 8. Capture Phase Retrospective
 
 This step runs only when the phase is being closed (all tasks verified or --force override).
