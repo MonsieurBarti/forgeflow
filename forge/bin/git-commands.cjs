@@ -108,7 +108,7 @@ module.exports = {
     }
 
     const branch = milestoneId
-      ? `forge/m-${milestoneId}/phase-${phaseId}`
+      ? `forge/m-${milestoneId}-phase-${phaseId}`
       : `forge/phase-${phaseId}`;
 
     const existing = git('branch --list ' + branch, { allowFail: true });
@@ -201,7 +201,7 @@ module.exports = {
     }
 
     const branch = milestoneId
-      ? `forge/m-${milestoneId}/phase-${phaseId}`
+      ? `forge/m-${milestoneId}-phase-${phaseId}`
       : `forge/phase-${phaseId}`;
 
     // Idempotency: if a PR already exists for this branch, return it
