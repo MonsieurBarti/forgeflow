@@ -167,6 +167,14 @@ function extractWorkspacePath(bead) {
  * Collect all phases and requirements for a project, traversing milestones.
  * Hierarchy: Project > Milestone > Phases/Requirements
  * Also picks up any phases/reqs still directly under the project (legacy).
+ *
+ * Returns:
+ *   - milestones: raw milestone beads (for backward compat)
+ *   - phases: flat array of all phases across milestones (for backward compat)
+ *   - requirements: flat array of all requirements across milestones (for backward compat)
+ *   - milestoneDetails: array of milestone objects with nested phases/requirements,
+ *     each including { id, title, status, goal, phases, requirements, progress,
+ *     phase_count, completed_count }
  */
 function collectProjectIssues(projectId) {
   const children = bdJson(`children ${projectId}`);
@@ -177,26 +185,75 @@ function collectProjectIssues(projectId) {
   const requirements = [];
   const seenIds = new Set();
 
-  const addIssues = (items) => {
-    for (const i of items) {
-      if (seenIds.has(i.id)) continue;
-      seenIds.add(i.id);
-      if ((i.labels || []).includes('forge:phase')) phases.push(i);
-      else if ((i.labels || []).includes('forge:req') || i.issue_type === 'feature') requirements.push(i);
-    }
+  // Per-milestone grouping
+  const milestoneDetails = [];
+
+  const classifyIssue = (item) => {
+    if ((item.labels || []).includes('forge:phase')) return 'phase';
+    if ((item.labels || []).includes('forge:req') || item.issue_type === 'feature') return 'req';
+    return null;
   };
 
-  // Collect from milestones (correct hierarchy)
+  // Collect from milestones (correct hierarchy) with per-milestone grouping
   for (const ms of milestones) {
     const msChildren = bdJson(`children ${ms.id}`);
     const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
-    addIssues(msIssues);
+
+    const msPhases = [];
+    const msReqs = [];
+    for (const i of msIssues) {
+      if (seenIds.has(i.id)) continue;
+      seenIds.add(i.id);
+      const kind = classifyIssue(i);
+      if (kind === 'phase') { phases.push(i); msPhases.push(i); }
+      else if (kind === 'req') { requirements.push(i); msReqs.push(i); }
+    }
+
+    const completedCount = msPhases.filter(p => p.status === 'closed').length;
+    const phaseCount = msPhases.length;
+
+    milestoneDetails.push({
+      id: ms.id,
+      title: ms.title,
+      status: ms.status,
+      goal: ms.description || '',
+      phases: msPhases,
+      requirements: msReqs,
+      progress: phaseCount > 0 ? Math.round((completedCount / phaseCount) * 100) : 0,
+      phase_count: phaseCount,
+      completed_count: completedCount,
+    });
   }
 
-  // Also collect any legacy direct children
-  addIssues(issues);
+  // Also collect any legacy direct children (not already seen via milestones)
+  const legacyPhases = [];
+  const legacyReqs = [];
+  for (const i of issues) {
+    if (seenIds.has(i.id)) continue;
+    seenIds.add(i.id);
+    const kind = classifyIssue(i);
+    if (kind === 'phase') { phases.push(i); legacyPhases.push(i); }
+    else if (kind === 'req') { requirements.push(i); legacyReqs.push(i); }
+  }
 
-  return { milestones, phases, requirements };
+  // If there are legacy items not under any milestone, group them as "Ungrouped"
+  if (legacyPhases.length > 0 || legacyReqs.length > 0) {
+    const completedCount = legacyPhases.filter(p => p.status === 'closed').length;
+    const phaseCount = legacyPhases.length;
+    milestoneDetails.push({
+      id: '_ungrouped',
+      title: 'Ungrouped',
+      status: 'open',
+      goal: '',
+      phases: legacyPhases,
+      requirements: legacyReqs,
+      progress: phaseCount > 0 ? Math.round((completedCount / phaseCount) * 100) : 0,
+      phase_count: phaseCount,
+      completed_count: completedCount,
+    });
+  }
+
+  return { milestones, phases, requirements, milestoneDetails };
 }
 
 /**
@@ -247,6 +304,49 @@ function getRequirementCoverage(requirements) {
     });
   }
   return coverage;
+}
+
+/**
+ * Collect agent roster data by reading agents/*.md frontmatter.
+ * Returns an array of { name, description, color, vibe } objects.
+ * Looks for agents/ directory relative to the git root, falling back to cwd.
+ */
+function collectAgentRoster() {
+  const gitRoot = findGitRoot(process.cwd());
+  const searchDirs = [];
+  if (gitRoot) searchDirs.push(path.join(gitRoot, 'agents'));
+  searchDirs.push(path.join(process.cwd(), 'agents'));
+
+  let agentsDir = null;
+  for (const dir of searchDirs) {
+    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      agentsDir = dir;
+      break;
+    }
+  }
+
+  if (!agentsDir) return [];
+
+  const agents = [];
+  try {
+    const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md')).sort();
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(agentsDir, file), 'utf8');
+        const fm = parseFrontmatter(content);
+        if (fm.name) {
+          agents.push({
+            name: fm.name,
+            description: fm.description || '',
+            color: fm.color || '',
+            vibe: fm.vibe || fm.emoji || '',
+          });
+        }
+      } catch { /* skip unreadable agent files */ }
+    }
+  } catch { /* skip unreadable agents dir */ }
+
+  return agents;
 }
 
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
@@ -691,8 +791,9 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const { phases, requirements } = collectProjectIssues(projectId);
+    const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
 
+    // Build flat phaseDetails and reqCoverage (used by generateDashboardHTML for overall view)
     const phaseDetails = buildPhaseDetails(phases, { includeMeta: true });
 
     for (const pd of phaseDetails) {
@@ -706,6 +807,32 @@ module.exports = {
     const completedPhases = phases.filter(p => p.status === 'closed').length;
     const progressPercent = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
 
+    // Build milestone-grouped structure with nested phase details and req coverage
+    const milestonesGrouped = milestoneDetails.map(ms => {
+      const msPhaseDetails = buildPhaseDetails(ms.phases, { includeMeta: true });
+      for (const pd of msPhaseDetails) {
+        pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+      }
+      msPhaseDetails.sort((a, b) => a._sortKey - b._sortKey);
+
+      const msReqCoverage = getRequirementCoverage(ms.requirements);
+
+      return {
+        id: ms.id,
+        title: ms.title,
+        status: ms.status,
+        goal: ms.goal,
+        phases: msPhaseDetails,
+        requirements: msReqCoverage,
+        progress: ms.progress,
+        phase_count: ms.phase_count,
+        completed_count: ms.completed_count,
+      };
+    });
+
+    // Collect agent roster
+    const agents = collectAgentRoster();
+
     const projectTitle = project?.title || projectId;
     const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
 
@@ -713,6 +840,9 @@ module.exports = {
       projectTitle, projectId, timestamp, progressPercent,
       totalPhases, completedPhases,
       phaseDetails, reqCoverage,
+      // New milestone-grouped structure
+      milestones: milestonesGrouped,
+      agents,
     };
 
     const html = generateDashboardHTML(data);
