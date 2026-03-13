@@ -262,6 +262,16 @@ function collectProjectIssues(projectId) {
  * (used by generate-dashboard but not full-progress).
  */
 function buildPhaseDetails(phases, { includeMeta = false } = {}) {
+  // Fetch all phase completion timestamps in one call
+  let completionTimestamps = {};
+  if (includeMeta) {
+    const raw = bd('memories forge:phase:', { allowFail: true }) || '';
+    for (const line of raw.split('\n')) {
+      const match = line.match(/forge:phase:([\w-]+):completed\s+(\S+)/);
+      if (match) completionTimestamps[match[1]] = match[2];
+    }
+  }
+
   const details = [];
   for (const phase of phases) {
     const phaseChildren = bdJson(`children ${phase.id}`);
@@ -278,7 +288,10 @@ function buildPhaseDetails(phases, { includeMeta = false } = {}) {
         ? tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' }))
         : tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
     };
-    if (includeMeta) entry.description = phase.description || '';
+    if (includeMeta) {
+      entry.description = phase.description || '';
+      entry.completed_at = completionTimestamps[phase.id] || '';
+    }
     details.push(entry);
   }
   return details;
@@ -423,7 +436,9 @@ function generateDashboardHTML(data) {
             </li>`;
       }).join('\n');
       const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
-      const completionHTML = phase.status === 'closed' ? `<div class="phase-completed">Completed</div>` : '';
+      const completionHTML = phase.status === 'closed'
+        ? `<div class="phase-completed">${phase.completed_at ? `Completed ${new Date(phase.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'Completed'}</div>`
+        : '';
       return `
           <div class="phase-card ${statusClass}">
             <div class="phase-header">
