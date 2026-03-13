@@ -950,9 +950,26 @@ module.exports = {
       process.exit(1);
     }
 
+    // Two-level traversal: project -> milestones -> phases (milestone hierarchy from Phase 9.1)
     const children = bdJson(`children ${projectId}`);
     const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-    const phases = issues.filter(i =>
+    const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
+    const allIssues = [];
+    const seenIds = new Set();
+    const addIssues = (items) => {
+      for (const i of items) {
+        if (seenIds.has(i.id)) continue;
+        seenIds.add(i.id);
+        allIssues.push(i);
+      }
+    };
+    for (const ms of milestones) {
+      const msChildren = bdJson(`children ${ms.id}`);
+      const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
+      addIssues(msIssues);
+    }
+    addIssues(issues); // Also collect legacy direct children
+    const phases = allIssues.filter(i =>
       (i.labels || []).includes('forge:phase') && i.status === 'closed'
     );
 
