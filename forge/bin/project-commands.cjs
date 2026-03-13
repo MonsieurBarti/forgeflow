@@ -24,6 +24,128 @@ const {
   findGitRoot,
 } = require('./core.cjs');
 
+// ---------------------------------------------------------------------------
+// Shared helpers (extracted to reduce duplication)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize the result of bdJson('children ...') into a flat array.
+ * bd may return an array directly, or an object with .issues / .children.
+ */
+function normalizeChildren(raw) {
+  return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
+}
+
+/**
+ * Parse a bd create result to extract the bead ID.
+ * Tries JSON first, falls back to regex match.
+ */
+function parseBdCreateId(result) {
+  if (!result) return null;
+  try {
+    const data = JSON.parse(result);
+    return data.id || data.issue_id || null;
+  } catch {
+    const match = result.match(/([a-z]+-[a-z0-9]+)/);
+    return match ? match[1] : null;
+  }
+}
+
+/**
+ * Coerce string 'true'/'false' to boolean, pass through everything else.
+ */
+function coerceBool(v) {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return v;
+}
+
+/**
+ * Parse a dot-separated settings key into { topKey, subKey, isNested }.
+ */
+function parseDotKey(key) {
+  const dotIdx = key.indexOf('.');
+  const isNested = dotIdx !== -1;
+  return {
+    topKey: isNested ? key.slice(0, dotIdx) : key,
+    subKey: isNested ? key.slice(dotIdx + 1) : null,
+    isNested,
+  };
+}
+
+/**
+ * Load settings merged from defaults < global < project.
+ * Returns { merged, sources }.
+ */
+function loadMergedSettings() {
+  const merged = { ...SETTINGS_DEFAULTS };
+  const sources = {};
+  for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+    sources[key] = 'default';
+  }
+
+  try {
+    const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
+    const globalSettings = parseFrontmatter(globalText);
+    for (const [key, val] of Object.entries(globalSettings)) {
+      if (key in SETTINGS_DEFAULTS) {
+        merged[key] = val;
+        sources[key] = 'global';
+      }
+    }
+  } catch {
+    // No global settings file
+  }
+
+  try {
+    const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+    const projectText = fs.readFileSync(projectPath, 'utf8');
+    const projectSettings = parseSimpleYaml(projectText);
+    for (const [key, val] of Object.entries(projectSettings)) {
+      if (key in SETTINGS_DEFAULTS) {
+        merged[key] = val;
+        sources[key] = 'project';
+      }
+    }
+  } catch {
+    // No project settings file
+  }
+
+  return { merged, sources };
+}
+
+/**
+ * Stamp _sortKey on phase detail objects, sort, then clean up the transient key.
+ */
+function sortPhaseDetails(details) {
+  for (const pd of details) {
+    pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
+  }
+  details.sort((a, b) => a._sortKey - b._sortKey);
+  for (const pd of details) {
+    delete pd._sortKey;
+  }
+  return details;
+}
+
+/**
+ * Named color map (module-level constant for reuse).
+ */
+const COLOR_MAP = {
+  red: '#e74c3c', orange: '#f39c12', yellow: '#f1c40f', green: '#2ecc71',
+  blue: '#3498db', purple: '#9b59b6', cyan: '#00bcd4', pink: '#e91e63',
+  indigo: '#6366f1', teal: '#14b8a6', amber: '#f59e0b', crimson: '#dc2626',
+  magenta: '#d946ef', lime: '#84cc16', violet: '#8b5cf6', emerald: '#10b981',
+  rose: '#f43f5e', sky: '#0ea5e9', slate: '#64748b', gray: '#6b7280',
+  white: '#fafafa', gold: '#eab308',
+};
+
+/** Hex color pattern for validation */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,6}$/;
+
+/** Safe fallback color when an untrusted value fails validation */
+const SAFE_FALLBACK_COLOR = '#8b949e';
+
 /**
  * Expand simple glob patterns (e.g., "apps/*", "packages/*") to package directories.
  * Complex globs containing intermediate wildcards are skipped.
@@ -167,36 +289,91 @@ function extractWorkspacePath(bead) {
  * Collect all phases and requirements for a project, traversing milestones.
  * Hierarchy: Project > Milestone > Phases/Requirements
  * Also picks up any phases/reqs still directly under the project (legacy).
+ *
+ * Returns:
+ *   - milestones: raw milestone beads (for backward compat)
+ *   - phases: flat array of all phases across milestones (for backward compat)
+ *   - requirements: flat array of all requirements across milestones (for backward compat)
+ *   - milestoneDetails: array of milestone objects with nested phases/requirements,
+ *     each including { id, title, status, goal, phases, requirements, progress,
+ *     phase_count, completed_count }
  */
 function collectProjectIssues(projectId) {
-  const children = bdJson(`children ${projectId}`);
-  const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+  const issues = normalizeChildren(bdJson(`children ${projectId}`));
 
   const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
   const phases = [];
   const requirements = [];
   const seenIds = new Set();
 
-  const addIssues = (items) => {
-    for (const i of items) {
-      if (seenIds.has(i.id)) continue;
-      seenIds.add(i.id);
-      if ((i.labels || []).includes('forge:phase')) phases.push(i);
-      else if ((i.labels || []).includes('forge:req') || i.issue_type === 'feature') requirements.push(i);
-    }
+  // Per-milestone grouping
+  const milestoneDetails = [];
+
+  const classifyIssue = (item) => {
+    if ((item.labels || []).includes('forge:phase')) return 'phase';
+    if ((item.labels || []).includes('forge:req') || item.issue_type === 'feature') return 'req';
+    return null;
   };
 
-  // Collect from milestones (correct hierarchy)
+  // Collect from milestones (correct hierarchy) with per-milestone grouping
   for (const ms of milestones) {
-    const msChildren = bdJson(`children ${ms.id}`);
-    const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
-    addIssues(msIssues);
+    const msIssues = normalizeChildren(bdJson(`children ${ms.id}`));
+
+    const msPhases = [];
+    const msReqs = [];
+    for (const i of msIssues) {
+      if (seenIds.has(i.id)) continue;
+      seenIds.add(i.id);
+      const kind = classifyIssue(i);
+      if (kind === 'phase') { phases.push(i); msPhases.push(i); }
+      else if (kind === 'req') { requirements.push(i); msReqs.push(i); }
+    }
+
+    const completedCount = msPhases.filter(p => p.status === 'closed').length;
+    const phaseCount = msPhases.length;
+
+    milestoneDetails.push({
+      id: ms.id,
+      title: ms.title,
+      status: ms.status,
+      goal: ms.description || '',
+      phases: msPhases,
+      requirements: msReqs,
+      progress: phaseCount > 0 ? Math.round((completedCount / phaseCount) * 100) : 0,
+      phase_count: phaseCount,
+      completed_count: completedCount,
+    });
   }
 
-  // Also collect any legacy direct children
-  addIssues(issues);
+  // Also collect any legacy direct children (not already seen via milestones)
+  const legacyPhases = [];
+  const legacyReqs = [];
+  for (const i of issues) {
+    if (seenIds.has(i.id)) continue;
+    seenIds.add(i.id);
+    const kind = classifyIssue(i);
+    if (kind === 'phase') { phases.push(i); legacyPhases.push(i); }
+    else if (kind === 'req') { requirements.push(i); legacyReqs.push(i); }
+  }
 
-  return { milestones, phases, requirements };
+  // If there are legacy items not under any milestone, group them as "Ungrouped"
+  if (legacyPhases.length > 0 || legacyReqs.length > 0) {
+    const completedCount = legacyPhases.filter(p => p.status === 'closed').length;
+    const phaseCount = legacyPhases.length;
+    milestoneDetails.push({
+      id: '_ungrouped',
+      title: 'Ungrouped',
+      status: 'open',
+      goal: '',
+      phases: legacyPhases,
+      requirements: legacyReqs,
+      progress: phaseCount > 0 ? Math.round((completedCount / phaseCount) * 100) : 0,
+      phase_count: phaseCount,
+      completed_count: completedCount,
+    });
+  }
+
+  return { milestones, phases, requirements, milestoneDetails };
 }
 
 /**
@@ -205,10 +382,19 @@ function collectProjectIssues(projectId) {
  * (used by generate-dashboard but not full-progress).
  */
 function buildPhaseDetails(phases, { includeMeta = false } = {}) {
+  // Fetch all phase completion timestamps in one call
+  let completionTimestamps = {};
+  if (includeMeta) {
+    const raw = bd('memories forge:phase:', { allowFail: true }) || '';
+    for (const line of raw.split('\n')) {
+      const match = line.match(/forge:phase:([\w-]+):completed\s+(\S+)/);
+      if (match) completionTimestamps[match[1]] = match[2];
+    }
+  }
+
   const details = [];
   for (const phase of phases) {
-    const phaseChildren = bdJson(`children ${phase.id}`);
-    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
     const entry = {
       id: phase.id,
       title: phase.title,
@@ -221,7 +407,10 @@ function buildPhaseDetails(phases, { includeMeta = false } = {}) {
         ? tasks.map(t => ({ id: t.id, title: t.title, status: t.status, description: t.description || '', acceptance_criteria: t.acceptance_criteria || '' }))
         : tasks.map(t => ({ id: t.id, title: t.title, status: t.status })),
     };
-    if (includeMeta) entry.description = phase.description || '';
+    if (includeMeta) {
+      entry.description = phase.description || '';
+      entry.completed_at = completionTimestamps[phase.id] || '';
+    }
     details.push(entry);
   }
   return details;
@@ -249,6 +438,49 @@ function getRequirementCoverage(requirements) {
   return coverage;
 }
 
+/**
+ * Collect agent roster data by reading agents/*.md frontmatter.
+ * Returns an array of { name, description, color, vibe } objects.
+ * Looks for agents/ directory relative to the git root, falling back to cwd.
+ */
+function collectAgentRoster() {
+  const gitRoot = findGitRoot(process.cwd());
+  const searchDirs = [];
+  if (gitRoot) searchDirs.push(path.join(gitRoot, 'agents'));
+  searchDirs.push(path.join(process.cwd(), 'agents'));
+
+  let agentsDir = null;
+  for (const dir of searchDirs) {
+    if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+      agentsDir = dir;
+      break;
+    }
+  }
+
+  if (!agentsDir) return [];
+
+  const agents = [];
+  try {
+    const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md')).sort();
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(agentsDir, file), 'utf8');
+        const fm = parseFrontmatter(content);
+        if (fm.name) {
+          agents.push({
+            name: fm.name,
+            description: fm.description || '',
+            color: fm.color || '',
+            vibe: fm.vibe || fm.emoji || '',
+          });
+        }
+      } catch { /* skip unreadable agent files */ }
+    }
+  } catch { /* skip unreadable agents dir */ }
+
+  return agents;
+}
+
 // generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
 
 function esc(s) {
@@ -259,6 +491,7 @@ function generateDashboardHTML(data) {
   const {
     projectTitle, projectId, timestamp, progressPercent,
     totalPhases, completedPhases, phaseDetails, reqCoverage,
+    milestones = [], agents = [],
   } = data;
 
   const phasesOpen = phaseDetails.filter(p => p.status === 'open').length;
@@ -266,204 +499,798 @@ function generateDashboardHTML(data) {
   const reqsCovered = reqCoverage.filter(r => r.covered).length;
   const reqsTotal = reqCoverage.length;
 
-  const phaseCardsHTML = phaseDetails.map((phase) => {
-    const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
-    const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
-    const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
-    const tasksHTML = phase.tasks.map(t => {
-      const icon = t.status === 'closed' ? '&#x2713;' : t.status === 'in_progress' ? '&#x25B6;' : '&#x25CB;';
-      const cls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
-      const hasDetails = t.description || t.acceptance_criteria;
-      const detailsHTML = hasDetails ? `
-        <div class="task-details">
-          ${t.description ? `<div class="task-desc"><strong>Description:</strong> ${esc(t.description)}</div>` : ''}
-          ${t.acceptance_criteria ? `<div class="task-ac"><strong>Acceptance Criteria:</strong><pre>${esc(t.acceptance_criteria)}</pre></div>` : ''}
-        </div>` : '';
-      return `<li class="${cls}">
-        <details${hasDetails ? '' : ' class="no-detail"'}>
-          <summary><span class="task-icon">${icon}</span> ${esc(t.title)} <code>${t.id}</code></summary>
-          ${detailsHTML}
-        </details>
-      </li>`;
+  // Gradient accent colors per milestone (cycling)
+  const gradients = [
+    ['#667eea', '#764ba2'],
+    ['#f093fb', '#f5576c'],
+    ['#4facfe', '#00f2fe'],
+    ['#43e97b', '#38f9d7'],
+    ['#fa709a', '#fee140'],
+    ['#a18cd1', '#fbc2eb'],
+    ['#fccb90', '#d57eeb'],
+    ['#e0c3fc', '#8ec5fc'],
+  ];
+
+  // Determine active milestone index (first in_progress, or first open, or 0)
+  let activeMsIdx = milestones.findIndex(ms => ms.status === 'in_progress');
+  if (activeMsIdx === -1) activeMsIdx = milestones.findIndex(ms => ms.status === 'open');
+  if (activeMsIdx === -1) activeMsIdx = 0;
+
+  // Build milestone tabs HTML
+  const milestoneTabsHTML = milestones.map((ms, i) => {
+    const grad = gradients[i % gradients.length];
+    const isActive = i === activeMsIdx;
+    const isDone = ms.status === 'closed';
+    const checkmark = isDone ? '<span class="tab-check">&#x2713;</span>' : '';
+    return `<button class="ms-tab${isActive ? ' active' : ''}" data-tab="${i}" style="--tab-c1:${grad[0]};--tab-c2:${grad[1]}">${checkmark}${esc(ms.title)}</button>`;
+  }).join('\n      ');
+
+  // Build milestone panels
+  const milestonePanelsHTML = milestones.map((ms, i) => {
+    const grad = gradients[i % gradients.length];
+    const isActive = i === activeMsIdx;
+    const msPhases = ms.phases || [];
+    const msReqs = ms.requirements || [];
+    const msCoveredReqs = msReqs.filter(r => r.covered).length;
+
+    // Phase cards for this milestone
+    const phaseCardsHTML = msPhases.map((phase) => {
+      const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
+      const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+      const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
+      const tasksHTML = phase.tasks.map(t => {
+        const icon = t.status === 'closed' ? '&#x2713;' : t.status === 'in_progress' ? '&#x25B6;' : '&#x25CB;';
+        const cls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
+        const hasDetails = t.description || t.acceptance_criteria;
+        const detailsHTML = hasDetails ? `
+              <div class="task-details">
+                ${t.description ? `<div class="task-desc"><strong>Description:</strong> ${esc(t.description)}</div>` : ''}
+                ${t.acceptance_criteria ? `<div class="task-ac"><strong>Acceptance Criteria:</strong><pre>${esc(t.acceptance_criteria)}</pre></div>` : ''}
+              </div>` : '';
+        return `<li class="${cls}">
+              <details${hasDetails ? '' : ' class="no-detail"'}>
+                <summary><span class="task-icon">${icon}</span> ${esc(t.title)} <code>${t.id}</code></summary>
+                ${detailsHTML}
+              </details>
+            </li>`;
+      }).join('\n');
+      const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
+      const completionHTML = phase.status === 'closed'
+        ? `<div class="phase-completed">${phase.completed_at ? `Completed ${new Date(phase.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'Completed'}</div>`
+        : '';
+      return `
+          <div class="phase-card ${statusClass}">
+            <div class="phase-header">
+              <h3>${esc(phase.title)}</h3>
+              <span class="badge badge-${statusClass}">${statusBadge}</span>
+            </div>
+            ${phaseDescHTML}
+            ${completionHTML}
+            <div class="progress-bar-container">
+              <div class="progress-bar" style="width:${pct}%;background:linear-gradient(90deg,${grad[0]},${grad[1]})"></div>
+            </div>
+            <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks &middot; ${pct}%</div>
+            ${phase.tasks.length > 0 ? `<ul class="task-list">${tasksHTML}</ul>` : '<p class="no-tasks">No tasks</p>'}
+          </div>`;
     }).join('\n');
-    const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
+
+    // Requirements for this milestone
+    const msReqGridHTML = msReqs.map(r => {
+      const cls = r.covered ? 'req-covered' : 'req-uncovered';
+      return `<div class="req-cell ${cls}" title="${esc(r.title)} (${r.id})${r.covered ? ' — ' + r.covering_tasks + ' tasks' : ' — UNCOVERED'}">${esc(r.title.length > 30 ? r.title.slice(0, 28) + '\u2026' : r.title)}</div>`;
+    }).join('\n');
+
     return `
-      <div class="phase-card ${statusClass}" id="phase-${phase.id}">
-        <div class="phase-header">
-          <h3>${esc(phase.title)}</h3>
-          <span class="badge badge-${statusClass}">${statusBadge}</span>
+      <div class="ms-panel${isActive ? ' active' : ''}" data-panel="${i}">
+        <div class="ms-header" style="--ms-c1:${grad[0]};--ms-c2:${grad[1]}">
+          <div class="ms-header-content">
+            <h2>${esc(ms.title)}</h2>
+            ${ms.goal ? `<p class="ms-goal">${esc(ms.goal)}</p>` : ''}
+          </div>
+          <div class="ms-ring-wrap">
+            <svg class="progress-ring" viewBox="0 0 80 80">
+              <circle class="progress-ring-bg" cx="40" cy="40" r="34" />
+              <circle class="progress-ring-fg" cx="40" cy="40" r="34"
+                stroke-dasharray="${Math.round(2 * Math.PI * 34)}"
+                stroke-dashoffset="${Math.round(2 * Math.PI * 34 * (1 - ms.progress / 100))}"
+                style="stroke:${grad[0]}" />
+            </svg>
+            <span class="ring-label">${ms.progress}%</span>
+          </div>
         </div>
-        ${phaseDescHTML}
-        <div class="progress-bar-container">
-          <div class="progress-bar" style="width:${pct}%"></div>
+        <div class="ms-stats-row">
+          <div class="ms-mini-stat"><span class="ms-mini-val">${ms.phase_count}</span><span class="ms-mini-lbl">Phases</span></div>
+          <div class="ms-mini-stat"><span class="ms-mini-val">${ms.completed_count}</span><span class="ms-mini-lbl">Done</span></div>
+          <div class="ms-mini-stat"><span class="ms-mini-val">${msReqs.length}</span><span class="ms-mini-lbl">Reqs</span></div>
+          <div class="ms-mini-stat"><span class="ms-mini-val">${msCoveredReqs}</span><span class="ms-mini-lbl">Covered</span></div>
         </div>
-        <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks &middot; ${pct}%</div>
-        ${phase.tasks.length > 0 ? `<ul class="task-list">${tasksHTML}</ul>` : '<p class="no-tasks">No tasks</p>'}
+        <div class="ms-body">
+          <h3 class="section-title">Phases</h3>
+          ${phaseCardsHTML || '<p class="empty-msg">No phases in this milestone</p>'}
+          ${msReqs.length > 0 ? `
+          <h3 class="section-title">Requirements (${msCoveredReqs}/${msReqs.length})</h3>
+          <div class="req-grid">${msReqGridHTML}</div>` : ''}
+        </div>
       </div>`;
   }).join('\n');
 
-  const reqGridHTML = reqCoverage.map(r => {
-    const cls = r.covered ? 'req-covered' : 'req-uncovered';
-    return `<div class="req-cell ${cls}" title="${esc(r.title)} (${r.id})${r.covered ? ' — ' + r.covering_tasks + ' tasks' : ' — UNCOVERED'}">${esc(r.title.length > 30 ? r.title.slice(0, 28) + '\u2026' : r.title)}</div>`;
+  // Agent roster
+  const agentCardsHTML = agents.map(a => {
+    const colorVal = a.color || SAFE_FALLBACK_COLOR;
+    const mapped = COLOR_MAP[colorVal.toLowerCase()];
+    // Validate: must be a known named color or a valid hex color
+    const resolvedColor = mapped || (HEX_COLOR_RE.test(colorVal) ? colorVal : SAFE_FALLBACK_COLOR);
+    return `
+        <div class="agent-card" style="--agent-color:${resolvedColor}">
+          <div class="agent-vibe">${esc(a.vibe)}</div>
+          <div class="agent-name">${esc(a.name)}</div>
+          <div class="agent-desc">${esc(a.description)}</div>
+          <span class="agent-badge" style="background:${resolvedColor}20;color:${resolvedColor};border:1px solid ${resolvedColor}40">${esc(a.color || 'default')}</span>
+        </div>`;
   }).join('\n');
 
-  const blockers = [];
-  for (const phase of phaseDetails) {
-    if (phase.status === 'blocked') {
-      blockers.push({ type: 'phase', id: phase.id, title: phase.title });
-    }
-    for (const t of phase.tasks) {
-      if (t.status === 'blocked') {
-        blockers.push({ type: 'task', id: t.id, title: t.title, phase: phase.title });
-      }
-    }
-  }
-  const blockersHTML = blockers.length === 0
-    ? '<p class="no-blockers">No blockers detected</p>'
-    : blockers.map(b => `<div class="blocker-item"><span class="blocker-type">${b.type}</span> <strong>${esc(b.title)}</strong> <code>${b.id}</code>${b.phase ? ` <span class="blocker-phase">in ${esc(b.phase)}</span>` : ''}</div>`).join('\n');
-
-  const chartData = JSON.stringify({
-    phaseLabels: ['Completed', 'In Progress', 'Open'],
-    phaseValues: [completedPhases, phasesInProgress, phasesOpen],
-    phaseColors: ['#2ecc71', '#f39c12', '#95a5a6'],
-    reqLabels: ['Covered', 'Uncovered'],
-    reqValues: [reqsCovered, reqsTotal - reqsCovered],
-    reqColors: ['#2ecc71', '#e74c3c'],
-  });
-
-  const tocItems = [
-    { href: '#overview', label: 'Overview' },
-    { href: '#phases', label: 'Phases' },
-    { href: '#requirements', label: 'Requirements' },
-    { href: '#blockers', label: 'Blockers' },
-    { href: '#charts', label: 'Charts' },
-  ];
-  const tocHTML = tocItems.map(t => `<a href="${t.href}">${t.label}</a>`).join('\n');
+  // Overall SVG progress rings data
+  const phaseRingPct = progressPercent;
+  const reqRingPct = reqsTotal > 0 ? Math.round((reqsCovered / reqsTotal) * 100) : 0;
+  const circumference = Math.round(2 * Math.PI * 54);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(projectTitle)} — Dashboard</title>
+<title>${esc(projectTitle)} - Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- TODO: Add integrity="sha384-..." crossorigin="anonymous" once Chart.js version is pinned -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"><\/script>
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --surface-2: #1c2128; --border: #30363d;
-    --text: #e6edf3; --text-muted: #8b949e; --accent: #58a6ff;
-    --green: #2ecc71; --orange: #f39c12; --red: #e74c3c; --blue: #58a6ff;
-    --sidebar-w: 200px;
+    --bg: #09090b;
+    --surface: rgba(255,255,255,0.03);
+    --surface-solid: #111113;
+    --surface-2: rgba(255,255,255,0.06);
+    --surface-hover: rgba(255,255,255,0.08);
+    --border: rgba(255,255,255,0.06);
+    --border-subtle: rgba(255,255,255,0.04);
+    --text: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --orange: #f59e0b;
+    --red: #ef4444;
+    --blue: #3b82f6;
   }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'IBM Plex Sans', -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
-  code, .mono { font-family: 'IBM Plex Mono', monospace; font-size: 0.85em; color: var(--text-muted); }
-  .sidebar { position: sticky; top: 0; height: 100vh; background: var(--surface); border-right: 1px solid var(--border); padding: 2rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
-  .sidebar h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.5rem; }
-  .sidebar a { display: block; color: var(--text-muted); text-decoration: none; padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.9rem; transition: all 0.15s; }
-  .sidebar a:hover { color: var(--text); background: var(--surface-2); }
-  .main { padding: 2.5rem 3rem; width: 100%; }
-  .main h1 { font-size: 1.75rem; font-weight: 600; margin-bottom: 0.25rem; }
-  .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 2rem; }
-  .overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
-  .stat-card .stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
-  .stat-card .stat-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  code, .mono {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8em;
+    color: var(--text-muted);
+  }
+
+  /* --- Header --- */
+  .dash-header {
+    padding: 2.5rem 3rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(99,102,241,0.04) 0%, transparent 100%);
+  }
+  .dash-header h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+  .dash-header .subtitle {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+  }
+
+  .dash-body { padding: 2rem 3rem 4rem; max-width: 1280px; margin: 0 auto; }
+
+  /* --- Glassmorphism stat cards --- */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  .stat-card {
+    background: var(--surface);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--card-accent, var(--accent));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.1);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .stat-card:hover::before { opacity: 1; }
+  .stat-card .stat-value {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.025em;
+  }
+  .stat-card .stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+  .stat-card.accent { --card-accent: var(--accent); }
   .stat-card.accent .stat-value { color: var(--accent); }
+  .stat-card.green { --card-accent: var(--green); }
   .stat-card.green .stat-value { color: var(--green); }
+  .stat-card.orange { --card-accent: var(--orange); }
   .stat-card.orange .stat-value { color: var(--orange); }
-  .big-progress { margin-bottom: 2.5rem; }
-  .big-progress-bar { width: 100%; height: 12px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
-  .big-progress-fill { height: 100%; background: linear-gradient(90deg, var(--green), var(--accent)); border-radius: 6px; }
-  .big-progress-label { text-align: right; font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem; }
-  section { margin-bottom: 2.5rem; }
-  section h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-  .phase-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
+  .stat-card.blue { --card-accent: var(--blue); }
+  .stat-card.blue .stat-value { color: var(--blue); }
+
+  /* --- SVG Progress Rings --- */
+  .charts-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .chart-card {
+    background: var(--surface);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    transition: border-color 0.2s ease;
+  }
+  .chart-card:hover { border-color: rgba(255,255,255,0.1); }
+  .chart-card h3 {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+  }
+  .chart-card .chart-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .chart-card .chart-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+  .ring-container {
+    flex-shrink: 0;
+    position: relative;
+    width: 80px;
+    height: 80px;
+  }
+  .ring-container svg {
+    width: 80px;
+    height: 80px;
+    transform: rotate(-90deg);
+  }
+  .ring-container .ring-bg {
+    fill: none;
+    stroke: var(--surface-2);
+    stroke-width: 6;
+  }
+  .ring-container .ring-fg {
+    fill: none;
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease;
+  }
+  .ring-pct {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  @keyframes ring-fill {
+    from { stroke-dashoffset: var(--ring-circumference); }
+  }
+  .ring-container .ring-fg {
+    animation: ring-fill 1.2s ease forwards;
+  }
+
+  /* --- Milestone tabs --- */
+  .ms-tabs-container { margin-bottom: 2.5rem; }
+  .ms-tabs-nav {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .ms-tabs-nav::-webkit-scrollbar { display: none; }
+  .ms-tab {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s ease, border-color 0.2s ease;
+    white-space: nowrap;
+    position: relative;
+  }
+  .ms-tab:hover {
+    color: var(--text-secondary);
+  }
+  .ms-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--tab-c1);
+  }
+  .tab-check {
+    color: var(--green);
+    margin-right: 0.35rem;
+    font-weight: 700;
+  }
+
+  /* --- Milestone panel --- */
+  .ms-panel { display: none; }
+  .ms-panel.active { display: block; }
+
+  .ms-header {
+    background: var(--surface);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1.5rem;
+    margin-bottom: 1.25rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .ms-header::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--ms-c1), var(--ms-c2));
+  }
+  .ms-header h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+  .ms-goal {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 0.35rem;
+    max-width: 600px;
+  }
+  .ms-ring-wrap {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex-shrink: 0;
+  }
+  .progress-ring {
+    width: 80px;
+    height: 80px;
+    transform: rotate(-90deg);
+  }
+  .progress-ring-bg {
+    fill: none;
+    stroke: var(--surface-2);
+    stroke-width: 5;
+  }
+  .progress-ring-fg {
+    fill: none;
+    stroke-width: 5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease;
+    animation: ring-fill 1.2s ease forwards;
+  }
+  .ring-label {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .ms-stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .ms-mini-stat {
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    text-align: center;
+  }
+  .ms-mini-val {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .ms-mini-lbl {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.1rem;
+  }
+
+  .ms-body { }
+  .section-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 1rem;
+    margin-top: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .empty-msg { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
+
+  /* --- Phase cards --- */
+  .phase-card {
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.2s ease, transform 0.15s ease;
+  }
+  .phase-card:hover {
+    border-color: rgba(255,255,255,0.1);
+    transform: translateX(2px);
+  }
   .phase-card.phase-active { border-left: 3px solid var(--orange); }
-  .phase-card.phase-done { border-left: 3px solid var(--green); opacity: 0.8; }
+  .phase-card.phase-done { border-left: 3px solid var(--green); }
   .phase-card.phase-pending { border-left: 3px solid var(--border); }
-  .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-  .phase-header h3 { font-size: 1rem; font-weight: 500; }
-  .badge { font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-  .badge-phase-done { background: rgba(46,204,113,0.15); color: var(--green); }
-  .badge-phase-active { background: rgba(243,156,18,0.15); color: var(--orange); }
-  .badge-phase-pending { background: rgba(139,148,158,0.15); color: var(--text-muted); }
-  .progress-bar-container { width: 100%; height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 0.35rem; }
-  .progress-bar { height: 100%; background: var(--accent); border-radius: 2px; }
-  .phase-stats { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .phase-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  .phase-header h3 { font-size: 0.95rem; font-weight: 500; }
+  .phase-desc { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .phase-completed {
+    font-size: 0.7rem;
+    color: var(--green);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+  }
+  .badge {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .badge-phase-done { background: rgba(34,197,94,0.12); color: var(--green); }
+  .badge-phase-active { background: rgba(245,158,11,0.12); color: var(--orange); }
+  .badge-phase-pending { background: rgba(113,113,122,0.12); color: var(--text-muted); }
+  .progress-bar-container {
+    width: 100%;
+    height: 3px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 0.35rem;
+  }
+  .progress-bar {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+  .phase-stats { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+
+  /* --- Task list --- */
   .task-list { list-style: none; padding: 0; }
-  .task-list li { padding: 0.3rem 0; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; }
+  .task-list li {
+    padding: 0.25rem 0;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
   .task-icon { width: 1.2em; text-align: center; flex-shrink: 0; }
-  .task-done { color: var(--green); } .task-active { color: var(--orange); } .task-pending { color: var(--text-muted); }
-  .no-tasks { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
-  .phase-desc { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
-  .task-list details summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; list-style: none; }
+  .task-done { color: var(--green); }
+  .task-active { color: var(--orange); }
+  .task-pending { color: var(--text-muted); }
+  .no-tasks { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+  .task-list details summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    transition: color 0.15s ease;
+  }
   .task-list details summary::-webkit-details-marker { display: none; }
-  .task-list details[open] summary { margin-bottom: 0.4rem; }
-  .task-details { margin-left: 1.7rem; padding: 0.5rem 0.75rem; background: var(--surface-2); border-radius: 6px; font-size: 0.8rem; color: var(--text-muted); }
-  .task-details pre { white-space: pre-wrap; font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; margin-top: 0.25rem; }
-  .task-desc, .task-ac { margin-bottom: 0.4rem; }
+  .task-list details summary:hover { color: var(--text); }
+  .task-list details[open] summary { margin-bottom: 0.35rem; }
+  .task-details {
+    margin-left: 1.7rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface-2);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .task-details pre {
+    white-space: pre-wrap;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    margin-top: 0.25rem;
+  }
+  .task-desc, .task-ac { margin-bottom: 0.35rem; }
   .no-detail summary { cursor: default; }
-  .req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem; }
-  .req-cell { padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 500; }
-  .req-covered { background: rgba(46,204,113,0.12); color: var(--green); border: 1px solid rgba(46,204,113,0.25); }
-  .req-uncovered { background: rgba(231,76,60,0.12); color: var(--red); border: 1px solid rgba(231,76,60,0.25); }
-  .blocker-item { background: rgba(231,76,60,0.08); border: 1px solid rgba(231,76,60,0.2); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; font-size: 0.9rem; }
-  .blocker-type { font-size: 0.7rem; text-transform: uppercase; color: var(--red); font-weight: 600; margin-right: 0.5rem; }
-  .blocker-phase { color: var(--text-muted); font-size: 0.8rem; }
-  .no-blockers { color: var(--green); font-size: 0.9rem; }
-  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
-  .chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
-  .chart-container h3 { font-size: 0.9rem; font-weight: 500; margin-bottom: 1rem; color: var(--text-muted); }
-  canvas { max-height: 250px; }
-  @media (max-width: 768px) { body { grid-template-columns: 1fr; } .sidebar { display: none; } .main { padding: 1.5rem; } .overview-grid { grid-template-columns: repeat(2, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
+
+  /* --- Requirement grid --- */
+  .req-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+  }
+  .req-cell {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: transform 0.15s ease;
+  }
+  .req-cell:hover { transform: translateY(-1px); }
+  .req-covered { background: rgba(34,197,94,0.08); color: var(--green); border: 1px solid rgba(34,197,94,0.15); }
+  .req-uncovered { background: rgba(239,68,68,0.08); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
+
+  /* --- Agent roster --- */
+  .agent-section { margin-top: 3rem; }
+  .agent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  .agent-card {
+    background: var(--surface);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .agent-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--agent-color);
+    opacity: 0.6;
+  }
+  .agent-card:hover {
+    border-color: rgba(255,255,255,0.1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+  }
+  .agent-vibe {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-bottom: 0.5rem;
+  }
+  .agent-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    letter-spacing: -0.01em;
+  }
+  .agent-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+  }
+  .agent-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* --- Responsive --- */
+  @media (max-width: 1024px) {
+    .dash-body { padding: 1.5rem; }
+    .dash-header { padding: 1.5rem; }
+    .overview-grid { grid-template-columns: repeat(2, 1fr); }
+    .charts-row { grid-template-columns: 1fr; }
+    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .dash-header { padding: 1.25rem; }
+    .dash-header h1 { font-size: 1.25rem; }
+    .dash-body { padding: 1rem; }
+    .overview-grid { grid-template-columns: 1fr; }
+    .charts-row { grid-template-columns: 1fr; }
+    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
+    .ms-header { flex-direction: column; gap: 1rem; text-align: center; }
+    .agent-grid { grid-template-columns: 1fr; }
+    .req-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<nav class="sidebar">
-  <h2>Dashboard</h2>
-  ${tocHTML}
-</nav>
-<main class="main">
+
+<header class="dash-header">
   <h1>${esc(projectTitle)}</h1>
   <p class="subtitle">Generated ${timestamp} &middot; <code>${projectId}</code></p>
-  <div class="big-progress" id="overview">
-    <div class="big-progress-bar"><div class="big-progress-fill" style="width:${progressPercent}%"></div></div>
-    <div class="big-progress-label">${progressPercent}% complete</div>
-  </div>
+</header>
+
+<div class="dash-body">
+
+  <!-- Overview stat cards -->
   <div class="overview-grid">
-    <div class="stat-card accent"><div class="stat-value">${totalPhases}</div><div class="stat-label">Total Phases</div></div>
-    <div class="stat-card green"><div class="stat-value">${completedPhases}</div><div class="stat-label">Completed</div></div>
-    <div class="stat-card orange"><div class="stat-value">${phasesInProgress}</div><div class="stat-label">In Progress</div></div>
-    <div class="stat-card"><div class="stat-value">${reqsTotal}</div><div class="stat-label">Requirements</div></div>
-  </div>
-  <section id="phases">
-    <h2>Phases</h2>
-    ${phaseCardsHTML}
-  </section>
-  <section id="requirements">
-    <h2>Requirement Coverage (${reqsCovered}/${reqsTotal})</h2>
-    ${reqsTotal > 0 ? `<div class="req-grid">${reqGridHTML}</div>` : '<p style="color:var(--text-muted)">No requirements defined</p>'}
-  </section>
-  <section id="blockers">
-    <h2>Blockers</h2>
-    ${blockersHTML}
-  </section>
-  <section id="charts">
-    <h2>Charts</h2>
-    <div class="chart-grid">
-      <div class="chart-container"><h3>Phase Status</h3><canvas id="phaseChart"></canvas></div>
-      <div class="chart-container"><h3>Requirement Coverage</h3><canvas id="reqChart"></canvas></div>
+    <div class="stat-card accent" style="--card-accent:var(--accent)">
+      <div class="stat-value">${totalPhases}</div>
+      <div class="stat-label">Total Phases</div>
     </div>
-  </section>
-</main>
+    <div class="stat-card green">
+      <div class="stat-value">${completedPhases}</div>
+      <div class="stat-label">Completed</div>
+    </div>
+    <div class="stat-card orange">
+      <div class="stat-value">${phasesInProgress}</div>
+      <div class="stat-label">In Progress</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="stat-value">${reqsTotal}</div>
+      <div class="stat-label">Requirements</div>
+    </div>
+  </div>
+
+  <!-- SVG Progress Rings -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="ring-container" style="--ring-circumference:${circumference}">
+        <svg viewBox="0 0 120 120">
+          <circle class="ring-bg" cx="60" cy="60" r="54" />
+          <circle class="ring-fg" cx="60" cy="60" r="54"
+            stroke="${'#22c55e'}"
+            stroke-dasharray="${circumference}"
+            stroke-dashoffset="${Math.round(circumference * (1 - phaseRingPct / 100))}"
+            style="--ring-circumference:${circumference}" />
+        </svg>
+        <span class="ring-pct">${phaseRingPct}%</span>
+      </div>
+      <div>
+        <h3>Phase Completion</h3>
+        <div class="chart-value">${completedPhases} / ${totalPhases}</div>
+        <div class="chart-sub">${phasesInProgress} in progress, ${phasesOpen} open</div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="ring-container" style="--ring-circumference:${circumference}">
+        <svg viewBox="0 0 120 120">
+          <circle class="ring-bg" cx="60" cy="60" r="54" />
+          <circle class="ring-fg" cx="60" cy="60" r="54"
+            stroke="${reqRingPct >= 80 ? '#22c55e' : reqRingPct >= 50 ? '#f59e0b' : '#ef4444'}"
+            stroke-dasharray="${circumference}"
+            stroke-dashoffset="${Math.round(circumference * (1 - reqRingPct / 100))}"
+            style="--ring-circumference:${circumference}" />
+        </svg>
+        <span class="ring-pct">${reqRingPct}%</span>
+      </div>
+      <div>
+        <h3>Requirement Coverage</h3>
+        <div class="chart-value">${reqsCovered} / ${reqsTotal}</div>
+        <div class="chart-sub">${reqsTotal - reqsCovered} uncovered</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Milestone tabs -->
+  ${milestones.length > 0 ? `
+  <div class="ms-tabs-container">
+    <div class="ms-tabs-nav">
+      ${milestoneTabsHTML}
+    </div>
+    ${milestonePanelsHTML}
+  </div>` : `
+  <div class="section-title">All Phases</div>
+  ${phaseDetails.map((phase) => {
+    const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
+    const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+    const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
+    return `<div class="phase-card ${statusClass}">
+      <div class="phase-header"><h3>${esc(phase.title)}</h3><span class="badge badge-${statusClass}">${statusBadge}</span></div>
+      <div class="progress-bar-container"><div class="progress-bar" style="width:${pct}%;background:var(--accent)"></div></div>
+      <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks</div>
+    </div>`;
+  }).join('\n')}
+  `}
+
+  <!-- Agent Roster -->
+  ${agents.length > 0 ? `
+  <div class="agent-section">
+    <h3 class="section-title">Agent Roster</h3>
+    <div class="agent-grid">
+      ${agentCardsHTML}
+    </div>
+  </div>` : ''}
+
+</div>
+
 <script>
-  const d = ${chartData};
-  const chartOpts = { responsive: true, plugins: { legend: { labels: { color: '#e6edf3', font: { family: 'IBM Plex Sans' } } } } };
-  new Chart(document.getElementById('phaseChart'), { type: 'doughnut', data: { labels: d.phaseLabels, datasets: [{ data: d.phaseValues, backgroundColor: d.phaseColors, borderWidth: 0 }] }, options: chartOpts });
-  new Chart(document.getElementById('reqChart'), { type: 'doughnut', data: { labels: d.reqLabels, datasets: [{ data: d.reqValues, backgroundColor: d.reqColors, borderWidth: 0 }] }, options: chartOpts });
+  // Tab switching
+  document.querySelectorAll('.ms-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      var idx = this.getAttribute('data-tab');
+      document.querySelectorAll('.ms-tab').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.ms-panel').forEach(function(p) { p.classList.remove('active'); });
+      this.classList.add('active');
+      var panel = document.querySelector('.ms-panel[data-panel="' + idx + '"]');
+      if (panel) panel.classList.add('active');
+    });
+  });
 <\/script>
 </body>
 </html>`;
@@ -691,20 +1518,43 @@ module.exports = {
     }
 
     const project = bdJson(`show ${projectId}`);
-    const { phases, requirements } = collectProjectIssues(projectId);
+    const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
 
-    const phaseDetails = buildPhaseDetails(phases, { includeMeta: true });
-
-    for (const pd of phaseDetails) {
-      pd._sortKey = parseFloat((pd.title.match(/Phase\s+([\d.]+)/i) || [])[1]) || 999;
-    }
-    phaseDetails.sort((a, b) => a._sortKey - b._sortKey);
-
+    // Build phaseDetails once (keyed by ID) and reqCoverage once globally
+    const phaseDetails = sortPhaseDetails(buildPhaseDetails(phases, { includeMeta: true }));
     const reqCoverage = getRequirementCoverage(requirements);
 
     const totalPhases = phases.length;
     const completedPhases = phases.filter(p => p.status === 'closed').length;
     const progressPercent = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
+
+    // Index for O(1) lookups
+    const phaseDetailMap = new Map(phaseDetails.map(pd => [pd.id, pd]));
+    const reqCoverageMap = new Map(reqCoverage.map(rc => [rc.id, rc]));
+
+    // Build milestone-grouped structure by slicing the pre-built maps
+    const milestonesGrouped = milestoneDetails.map(ms => {
+      const msPhaseDetails = sortPhaseDetails(
+        ms.phases.map(p => phaseDetailMap.get(p.id)).filter(Boolean)
+      );
+      const msReqCoverage = ms.requirements
+        .map(r => reqCoverageMap.get(r.id)).filter(Boolean);
+
+      return {
+        id: ms.id,
+        title: ms.title,
+        status: ms.status,
+        goal: ms.goal,
+        phases: msPhaseDetails,
+        requirements: msReqCoverage,
+        progress: ms.progress,
+        phase_count: ms.phase_count,
+        completed_count: ms.completed_count,
+      };
+    });
+
+    // Collect agent roster
+    const agents = collectAgentRoster();
 
     const projectTitle = project?.title || projectId;
     const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
@@ -713,6 +1563,8 @@ module.exports = {
       projectTitle, projectId, timestamp, progressPercent,
       totalPhases, completedPhases,
       phaseDetails, reqCoverage,
+      milestones: milestonesGrouped,
+      agents,
     };
 
     const html = generateDashboardHTML(data);
@@ -720,9 +1572,16 @@ module.exports = {
     const diagDir = path.join(process.cwd(), '.forge');
     fs.mkdirSync(diagDir, { recursive: true });
     const filePath = path.join(diagDir, `forge-dashboard-${projectId}.html`);
-    fs.writeFileSync(filePath, html, 'utf8');
+    // Path traversal guard: ensure filePath stays within diagDir
+    const resolvedDiagDir = path.resolve(diagDir);
+    const resolvedFilePath = path.resolve(filePath);
+    if (!resolvedFilePath.startsWith(resolvedDiagDir + path.sep) && resolvedFilePath !== resolvedDiagDir) {
+      console.error('Invalid dashboard file path');
+      process.exit(1);
+    }
+    fs.writeFileSync(resolvedFilePath, html, 'utf8');
 
-    output({ path: filePath, projectId, timestamp });
+    output({ path: resolvedFilePath, projectId, timestamp });
   },
 
   /**
@@ -735,9 +1594,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    const { phases } = collectProjectIssues(projectId);
 
     const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
     const completedPhases = phases.filter(p => p.status === 'closed').length;
@@ -745,8 +1602,7 @@ module.exports = {
     const inProgressTasks = [];
     for (const phase of phases) {
       if (phase.status === 'closed') continue;
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title, phase: phase.id });
@@ -793,15 +1649,12 @@ module.exports = {
       return;
     }
 
-    const children = bdJson(`children ${project.id}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    const { phases } = collectProjectIssues(project.id);
     const currentPhase = phases.find(p => p.status === 'in_progress') || phases.find(p => p.status === 'open');
 
     const inProgressTasks = [];
     if (currentPhase) {
-      const phaseChildren = bdJson(`children ${currentPhase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${currentPhase.id}`));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title });
@@ -836,8 +1689,7 @@ module.exports = {
       return;
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${projectId}`));
 
     const phases = issues.filter(i =>
       (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
@@ -871,8 +1723,7 @@ module.exports = {
     // Cache phase children once for reuse in task-labels and closeable-phase loops
     const phaseChildrenMap = new Map();
     for (const phase of phases) {
-      const phaseChildren = bdJson(`children ${phase.id}`);
-      const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
       phaseChildrenMap.set(phase.id, tasks);
     }
 
@@ -1125,38 +1976,7 @@ module.exports = {
    * Load merged settings (defaults < global < project).
    */
   'settings-load'() {
-    const merged = { ...SETTINGS_DEFAULTS };
-    const sources = {};
-    for (const key of Object.keys(SETTINGS_DEFAULTS)) {
-      sources[key] = 'default';
-    }
-
-    try {
-      const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const globalSettings = parseFrontmatter(globalText);
-      for (const [key, val] of Object.entries(globalSettings)) {
-        if (key in SETTINGS_DEFAULTS) {
-          merged[key] = val;
-          sources[key] = 'global';
-        }
-      }
-    } catch {
-      // No global settings file
-    }
-
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const projectText = fs.readFileSync(projectPath, 'utf8');
-      const projectSettings = parseSimpleYaml(projectText);
-      for (const [key, val] of Object.entries(projectSettings)) {
-        if (key in SETTINGS_DEFAULTS) {
-          merged[key] = val;
-          sources[key] = 'project';
-        }
-      }
-    } catch {
-      // No project settings file
-    }
+    const { merged, sources } = loadMergedSettings();
 
     const settings = Object.keys(SETTINGS_DEFAULTS).map(key => ({
       key,
@@ -1186,10 +2006,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const dotIdx = key.indexOf('.');
-    const isNested = dotIdx !== -1;
-    const topKey = isNested ? key.slice(0, dotIdx) : key;
-    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+    const { topKey, subKey, isNested } = parseDotKey(key);
 
     const EXTRA_TOP_KEYS = ['model_profile', 'model_overrides'];
     if (!isNested && !(topKey in SETTINGS_DEFAULTS) && !EXTRA_TOP_KEYS.includes(topKey)) {
@@ -1198,9 +2015,7 @@ module.exports = {
       process.exit(1);
     }
 
-    let parsedValue = value;
-    if (value === 'true') parsedValue = true;
-    else if (value === 'false') parsedValue = false;
+    const parsedValue = coerceBool(value);
 
     function setNestedKey(obj, tKey, sKey, val) {
       if (sKey) {
@@ -1252,10 +2067,7 @@ module.exports = {
       process.exit(1);
     }
 
-    const dotIdx = key.indexOf('.');
-    const isNested = dotIdx !== -1;
-    const topKey = isNested ? key.slice(0, dotIdx) : key;
-    const subKey = isNested ? key.slice(dotIdx + 1) : null;
+    const { topKey, subKey } = parseDotKey(key);
 
     function clearNestedKey(obj, tKey, sKey) {
       if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
@@ -1320,9 +2132,7 @@ module.exports = {
       } catch { /* new file */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
-        let parsedValue = value;
-        if (value === 'true') parsedValue = true;
-        else if (value === 'false') parsedValue = false;
+        const parsedValue = coerceBool(value);
         existing[key] = parsedValue;
         results.push({ key, value: parsedValue });
       }
@@ -1335,9 +2145,7 @@ module.exports = {
       } catch { /* new file */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
-        let parsedValue = value;
-        if (value === 'true') parsedValue = true;
-        else if (value === 'false') parsedValue = false;
+        const parsedValue = coerceBool(value);
         existing[key] = parsedValue;
         results.push({ key, value: parsedValue });
       }
@@ -1416,7 +2224,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    const value = bd(`kv get ${fullKey}`, { allowFail: true });
+    const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
     output({ key: fullKey, value: value || null });
   },
 
@@ -1473,7 +2281,7 @@ module.exports = {
       process.exit(1);
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
-    bd(`kv clear ${fullKey}`, { allowFail: true });
+    bdArgs(['kv', 'clear', fullKey], { allowFail: true });
     output({ ok: true, key: fullKey, cleared: true });
   },
 
@@ -1516,14 +2324,7 @@ module.exports = {
       process.exit(1);
     }
 
-    let debugId;
-    try {
-      const data = JSON.parse(result);
-      debugId = data.id || data.issue_id;
-    } catch {
-      const match = result.match(/([a-z]+-[a-z0-9]+)/);
-      debugId = match ? match[1] : null;
-    }
+    const debugId = parseBdCreateId(result);
 
     if (!debugId) {
       console.error('Failed to parse debug bead ID from:', result);
@@ -1614,20 +2415,13 @@ module.exports = {
     if (files) descParts.push(`Files: ${files}`);
     const fullDesc = descParts.filter(Boolean).join('\n');
 
-    const result = bd(`create --title="${title.replace(/"/g, '\\"')}" --description="${fullDesc.replace(/"/g, '\\"')}" --type=task --priority=3 --json`);
+    const result = bdArgs(['create', `--title=${title}`, `--description=${fullDesc}`, '--type=task', '--priority=3', '--json']);
     if (!result) {
       console.error('Failed to create todo bead');
       process.exit(1);
     }
 
-    let todoId;
-    try {
-      const data = JSON.parse(result);
-      todoId = data.id || data.issue_id;
-    } catch {
-      const match = result.match(/([a-z]+-[a-z0-9]+)/);
-      todoId = match ? match[1] : null;
-    }
+    const todoId = parseBdCreateId(result);
 
     if (!todoId) {
       console.error('Failed to parse todo bead ID from:', result);
@@ -1650,13 +2444,11 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
     const result = milestones.map(m => {
-      const mChildren = bdJson(`children ${m.id}`);
-      const mIssues = Array.isArray(mChildren) ? mChildren : (mChildren?.issues || mChildren?.children || []);
+      const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
       const reqs = mIssues.filter(i => (i.labels || []).includes('forge:req'));
 
@@ -1702,14 +2494,12 @@ module.exports = {
       process.exit(1);
     }
 
-    const children = bdJson(`children ${milestoneId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
     const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
 
     const phaseHealth = phases.map(phase => {
-      const pChildren = bdJson(`children ${phase.id}`);
-      const pIssues = Array.isArray(pChildren) ? pChildren : (pChildren?.issues || pChildren?.children || []);
+      const pIssues = normalizeChildren(bdJson(`children ${phase.id}`));
       const tasks = pIssues.filter(i => (i.labels || []).includes('forge:task'));
       const closedTasks = tasks.filter(t => t.status === 'closed');
       return {
@@ -1881,21 +2671,7 @@ module.exports = {
       verifier: resolveAgentModel('forge-verifier'),
     };
 
-    const merged = { ...SETTINGS_DEFAULTS };
-    try {
-      const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-      const globalSettings = parseFrontmatter(globalText);
-      for (const [key, val] of Object.entries(globalSettings)) {
-        if (key in SETTINGS_DEFAULTS) merged[key] = val;
-      }
-    } catch { /* no global settings */ }
-    try {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      const projectSettings = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      for (const [key, val] of Object.entries(projectSettings)) {
-        if (key in SETTINGS_DEFAULTS) merged[key] = val;
-      }
-    } catch { /* no project settings */ }
+    const { merged } = loadMergedSettings();
 
     output({
       found: !!project,
