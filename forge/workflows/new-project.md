@@ -1,6 +1,10 @@
 <purpose>
 Initialize a new Forge project. Guide the user through defining their vision, requirements,
 and a phased roadmap -- all stored as structured beads with dependency relationships.
+
+IMPORTANT: One project per repository. The project bead represents the entire product and
+is NEVER closed. It stays open for the lifetime of the repository. New work is always
+organized as milestones under the existing project via /forge:new-milestone.
 </purpose>
 
 <process>
@@ -27,9 +31,19 @@ If bead tracking is already initialized, skip this step silently and proceed.
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 ```
 
-If a project already exists, show it and ask if the user wants to create a new one or work on the existing one.
+**HARD GUARD — one project per repository.** If a project already exists:
+- Show the existing project name and ID
+- Tell the user: "This repository already has a Forge project. Use `/forge:new-milestone` to start a new milestone cycle."
+- **STOP.** Do not continue. Do not offer to create another project.
 
 ## 2. Gather Project Vision
+
+**Bootstrap context:** Before asking questions, scan the repository for existing context:
+- Read `README.md`, `package.json`, `Cargo.toml`, `pyproject.toml`, or equivalent to infer the project name and purpose
+- Check git remote (`git remote get-url origin`) to infer the repo name
+- Use this as a starting point — pre-fill what you can and only ask about gaps
+
+**The project name should be the repository/product name** (e.g., "ForgeFlow", "MyApp"), NOT a version or milestone label. The project bead represents the entire product, not a release cycle.
 
 **Auto mode** (`--auto @file`): Read the referenced file for context. Extract answers to the questions below from the document. If any are unclear, ask only about those gaps.
 
@@ -43,8 +57,10 @@ If a project already exists, show it and ask if the user wants to create a new o
 
 ## 3. Create Project Epic
 
+The title must be the **product/repo name** (e.g., "ForgeFlow"), not a version or milestone description.
+
 ```bash
-bd create --title="<project name>" \
+bd create --title="<product name>" \
   --description="<vision synthesized from answers above>" \
   --design="<scope and constraints>" \
   --type=epic --priority=1 --json

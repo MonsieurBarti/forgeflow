@@ -295,7 +295,9 @@ module.exports = {
         const data = JSON.parse(result);
         const issues = Array.isArray(data) ? data : (data.issues || []);
         if (issues.length > 0) {
-          output({ found: true, projects: issues, source: 'beads' });
+          // One project per repo — return the first (and should be only) project
+          const project = issues[0];
+          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
           return;
         }
       } catch {

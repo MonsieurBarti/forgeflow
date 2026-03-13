@@ -168,6 +168,8 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-remove <milestone-id>
 
 If the worktree no longer exists (already removed or was never created), treat this as success — the cleanup goal is achieved either way.
 
+**IMPORTANT: NEVER close the project bead.** The project stays open permanently — it represents the repository itself. Only milestones are closed.
+
 ## 8. Report and Next Steps
 
 ```
