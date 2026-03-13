@@ -139,19 +139,33 @@ Use AskUserQuestion:
 If the user provides a lesson, store it as a single-element array: `["<lesson>"]`.
 If the user skips, store an empty array: `[]`.
 
+**Build the context-write payload using recognized schema fields:**
+
+The context-write command only persists these fields: `agent`, `task`, `status`, `findings`,
+`decisions`, `blockers`, `artifacts`, `next_steps`. All other fields are silently dropped.
+Map the retrospective data as follows:
+
+- **findings** array: Include the approach effectiveness rating as a structured string
+  (`"Approach effectiveness: <N>/5"`), the task count (`"Task count: <N>"`), and each
+  key lesson as a separate string entry.
+- **decisions** array: If `--force` was used, include `"Phase closed with --force override"`.
+  Otherwise leave empty.
+- **blockers** array: If `blocker_count` > 0, include one entry per blocked task
+  (`"BLOCKED: <task-title> (<task-id>)"`). Otherwise leave empty.
+
 **Write the retrospective entry:**
 
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> \
-  '{"agent":"forge-verifier","status":"completed","task_count":<N>,"blocker_count":<N>,"approach_effectiveness":<1-5>,"key_lessons":[<lessons>],"forced":<bool>}'
+  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: <N>/5","Task count: <N>","<lesson1>"],"decisions":["<if forced>"],"blockers":["<if any>"]}'
 ```
 
-Replace `<N>`, `<1-5>`, `<lessons>`, and `<bool>` with the actual derived values before running.
+Replace placeholders with actual derived values before running.
 
 Example with real values:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
-  '{"agent":"forge-verifier","status":"completed","task_count":5,"blocker_count":1,"approach_effectiveness":4,"key_lessons":["Parallel agents reduced wall time significantly"],"forced":false}'
+  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: 4/5","Task count: 5","Parallel agents reduced wall time significantly"],"decisions":[],"blockers":["BLOCKED: Fix auth flow (task-xyz)"]}'
 ```
 
 ## 5.5. Push Branch and Create Pull Request

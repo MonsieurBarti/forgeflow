@@ -78,21 +78,35 @@ Resolve the model for the researcher agent:
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-researcher --raw)
 ```
 
-Before spawning the researcher, query for retrospective data from similar past phases:
+Before spawning the researcher, query for retrospective data from past phases:
 ```bash
 RETRO=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" retro-query <project-id>)
 ```
 
-Parse the JSON result. If `similar_phases` is non-empty, build a `RETRO_SECTION` string:
+Parse the JSON result. If the command fails or `phase_count` is 0, set `RETRO_SECTION` to
+empty string. Otherwise, build `RETRO_SECTION` from the actual output fields:
+
 ```
-Past phase retrospectives (similar phases):
-<for each similar phase>
-- Phase: <title> (effectiveness: <approach_effectiveness>/5, blockers: <blocker_count>)
-  Key lessons: <key_lessons joined by "; ">
+Retrospective data from <phase_count> past phase(s):
+
+Lessons learned:
+<for each entry in lessons array>
+- [<phase_title>] <lesson>
+</for each>
+
+⚠ Pitfall warnings:
+<for each entry in pitfall_flags array>
+- [<phase_title>] <pitfall>
+</for each>
+
+Effectiveness summary:
+<for each phase_id, rating in effectiveness_ratings>
+- <phase_title>: rated <rating>/5 — <findings> (<blockers> blocker(s))
 </for each>
 ```
 
-If `similar_phases` is empty or the command fails, set `RETRO_SECTION` to empty string.
+Omit any sub-section whose source array/object is empty. If all are empty, set
+`RETRO_SECTION` to empty string.
 
 Otherwise, spawn a **forge-researcher** agent to investigate the implementation approach:
 
