@@ -25,6 +25,69 @@ bd init --prefix <project_name>
 
 If bead tracking is already initialized, skip this step silently and proceed.
 
+## 0.5. Offer DoltHub Remote Setup
+
+Check if a Dolt remote is already configured:
+```bash
+bd dolt remote list 2>&1
+```
+
+If **no remotes configured** and bead tracking was just initialized (step 0 ran `bd init`),
+offer the user the option to set up DoltHub sync for their beads data.
+
+Use AskUserQuestion:
+- "Would you like to sync your project tracking data to DoltHub? This enables backup and collaboration. Free for public repos, free up to 1GB for private."
+- Options: "Yes, set up DoltHub sync" / "No, keep beads local only"
+
+If the user chooses yes:
+
+1. **Check Dolt credentials exist:**
+```bash
+dolt creds ls 2>&1
+```
+If no credentials, run `dolt login` and wait for the user to complete browser auth.
+
+2. **Ask for repo details** using AskUserQuestion:
+   - Repo name (default: same as the directory name)
+   - Visibility: Public (free unlimited) or Private (free up to 1GB, requires credit card on DoltHub)
+
+3. **Guide repo creation:**
+   DoltHub repos cannot be created via CLI — the user must create it on the web or via API token.
+
+   Ask: "Do you have a DoltHub API token, or would you prefer to create the repo on the web?"
+   - If **API token**: create the repo via API:
+     ```bash
+     curl -s -X POST "https://www.dolthub.com/api/v1alpha1/database" \
+       -H "authorization: token <TOKEN>" \
+       -H "content-type: application/json" \
+       -d '{"ownerName":"<username>","repoName":"<repo-name>","visibility":"<public|private>"}'
+     ```
+   - If **web**: Tell the user to go to `https://www.dolthub.com/profile/new-repository`,
+     create the repo with the chosen name and visibility, and come back.
+     Wait for confirmation via AskUserQuestion: "Let me know when the DoltHub repo is created."
+
+4. **Add the remote and push:**
+```bash
+# Get the Dolt username from config
+DOLT_USER=$(dolt config --global --get user.name 2>/dev/null)
+
+# Navigate to the project database inside .beads/dolt/
+cd .beads/dolt/<prefix>/ && dolt remote add origin "$DOLT_USER/<repo-name>" && cd -
+
+# Push initial data
+bd dolt push
+```
+
+5. **Verify round-trip:**
+```bash
+bd dolt pull
+```
+
+If push/pull succeed, confirm: "DoltHub sync is active. Your beads data will sync to
+https://www.dolthub.com/<username>/<repo-name>."
+
+If the user declines or if remotes are already configured, skip silently.
+
 ## 1. Check for Existing Project
 
 ```bash
