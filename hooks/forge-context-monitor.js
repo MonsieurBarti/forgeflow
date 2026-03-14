@@ -14,7 +14,8 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const BRIDGE_FILE = path.join(os.tmpdir(), 'forge-context-bridge.json');
+const BRIDGE_DIR = path.join(os.homedir(), '.cache', 'forge');
+const BRIDGE_FILE = path.join(BRIDGE_DIR, 'forge-context-bridge.json');
 const DEFAULT_WARNING_THRESHOLD = 0.35;
 const DEFAULT_CRITICAL_THRESHOLD = 0.25;
 const DEBOUNCE_CALLS = 5;

@@ -195,6 +195,14 @@ function _bdExec(argList, opts = {}) {
   }
 }
 
+/**
+ * Run a bd CLI command. When `args` is a string it is split on whitespace,
+ * which means values containing spaces or special characters will be mangled.
+ *
+ * WARNING: Never interpolate external/untrusted values into a string argument.
+ * Use bdArgs() (which takes an array) when any argument may contain spaces,
+ * user-supplied text, or other characters that could be split incorrectly.
+ */
 function bd(args, opts = {}) {
   const argList = Array.isArray(args) ? args : args.split(/\s+/);
   return _bdExec(argList, opts);

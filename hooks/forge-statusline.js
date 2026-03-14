@@ -14,7 +14,8 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
-const BRIDGE_FILE = path.join(os.tmpdir(), 'forge-context-bridge.json');
+const BRIDGE_DIR = path.join(os.homedir(), '.cache', 'forge');
+const BRIDGE_FILE = path.join(BRIDGE_DIR, 'forge-context-bridge.json');
 
 async function main() {
   try {
@@ -51,6 +52,7 @@ async function main() {
       }
     }
 
+    fs.mkdirSync(BRIDGE_DIR, { recursive: true });
     fs.writeFileSync(BRIDGE_FILE, JSON.stringify(bridge), { mode: 0o600 });
 
     // Try to get current project status with progress (async to avoid blocking)

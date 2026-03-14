@@ -185,7 +185,13 @@ From the detection results, identify:
 - Test framework (Jest, Playwright, xUnit, pytest, cargo test, etc.)
 
 **Test file naming convention for generated tests:**
-Place per-task test files at: `tests/forge/<phase-slug>/task-<task-id>.test.cjs`
+Place per-task test files at: `tests/forge/<phase-slug>/task-<task-id>.<ext>`
+The extension should match the detected framework and language:
+- Node.js (node:test): `.test.cjs` (default for CommonJS projects)
+- TypeScript (jest/vitest): `.test.ts`
+- Python (pytest): `_test.py` or `test_*.py`
+- Rust (cargo): placed in `src/` or `tests/` per Rust conventions
+- Go: `_test.go`
 For example: `tests/forge/phase-abc/task-xyz.test.cjs`
 
 If test structure is ambiguous, ask the user:

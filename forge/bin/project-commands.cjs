@@ -352,6 +352,7 @@ function collectProjectIssues(projectId) {
     return null;
   };
 
+  // TODO(perf): N+1 subprocess -- calls bd children per milestone. Needs bd CLI batch-query support.
   // Collect from milestones (correct hierarchy) with per-milestone grouping
   for (const ms of milestones) {
     const msIssues = normalizeChildren(bdJson(`children ${ms.id}`));
@@ -1432,6 +1433,37 @@ function generateDashboardHTML(data) {
 </html>`;
 }
 
+// --- Reusable test-runner detection helpers ---
+
+/**
+ * Check if a file exists under the given directory.
+ */
+function _fileExistsIn(dir, name) {
+  return fs.existsSync(path.join(dir, name));
+}
+
+/**
+ * Read a file from the given directory, returns null on failure.
+ */
+function _readFileIn(dir, name) {
+  try {
+    return fs.readFileSync(path.join(dir, name), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find a test directory under the given directory by checking common names.
+ */
+function _findTestDir(dir) {
+  const candidates = ['tests/', 'test/', '__tests__/', 'spec/', 'src/test/'];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(dir, candidate))) return candidate;
+  }
+  return null;
+}
+
 module.exports = {
   /**
    * Find the project bead in the current beads database.
@@ -1550,6 +1582,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools project-context <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1575,6 +1608,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases } = collectProjectIssues(projectId);
@@ -1606,6 +1640,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools full-progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1647,6 +1682,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools generate-dashboard <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
@@ -1722,6 +1758,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools save-session <project-bead-id>');
     }
+    validateId(projectId);
 
     const { phases } = collectProjectIssues(projectId);
 
@@ -1811,6 +1848,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools health <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     if (!project) {
@@ -2502,6 +2540,7 @@ module.exports = {
     if (!id || !field) {
       forgeError('MISSING_ARG', 'Missing required arguments: id and field', 'Run: forge-tools debug-update <id> <field> <value>');
     }
+    validateId(id);
 
     if (field === 'notes') {
       bdArgs(['update', id, `--notes=${value}`], { allowFail: true });
@@ -2559,6 +2598,7 @@ module.exports = {
     if (!projectId || !title) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and title', 'Run: forge-tools todo-create <project-id> <title> [description] [area] [files]');
     }
+    validateId(projectId);
 
     const descParts = [description];
     if (area) descParts.push(`Area: ${area}`);
@@ -2590,6 +2630,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools milestone-list <project-id>');
     }
+    validateId(projectId);
 
     const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
@@ -2633,6 +2674,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools milestone-audit <milestone-id>');
     }
+    validateId(milestoneId);
 
     const milestone = bdJson(`show ${milestoneId}`);
     if (!milestone) {
@@ -2712,6 +2754,7 @@ module.exports = {
     if (!projectId || !name) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and milestone-name', 'Run: forge-tools milestone-create <project-id> <milestone-name>');
     }
+    validateId(projectId);
 
     const title = `Milestone: ${name}`;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
@@ -2760,6 +2803,8 @@ module.exports = {
     // Children use flat workspace_path; the parent's workspace_paths map uses child bead IDs as keys.
     const children = [];
     for (const pkg of detected.packages) {
+      // Sanitize: reject workspace paths containing newlines to prevent YAML injection
+      if (/[\r\n]/.test(pkg.path)) continue;
       const childRaw = bdArgs(['create', `--title=${pkg.name}`, '--type=epic', '--priority=2', '--json']);
       let child;
       try { child = JSON.parse(childRaw); if (Array.isArray(child)) child = child[0]; } catch { child = null; }
@@ -2889,7 +2934,8 @@ module.exports = {
     }
 
     // 4. Read bridge file for context % and session cost
-    const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
+    const bridgeDir = path.join(os.homedir(), '.cache', 'forge');
+    const bridgePath = path.join(bridgeDir, 'forge-context-bridge.json');
     let contextPercent = null;
     let sessionCostUsd = null;
     let bridgeNote = null;
@@ -2998,9 +3044,11 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-snapshot <phase-id>');
     }
+    validateId(phaseId);
 
     // 1. Read bridge file
-    const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
+    const bridgeDir = path.join(os.homedir(), '.cache', 'forge');
+    const bridgePath = path.join(bridgeDir, 'forge-context-bridge.json');
     let bridgeData = null;
     try {
       const raw = fs.readFileSync(bridgePath, 'utf8');
@@ -3104,6 +3152,7 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-estimate <phase-id>');
     }
+    validateId(phaseId);
 
     const phase = bdJson(`show ${phaseId}`);
     if (!phase) {
@@ -3118,7 +3167,7 @@ module.exports = {
    * Auto-detect the project's test runner by inspecting config files.
    *
    * Checks (in order): package.json, Cargo.toml, pyproject.toml, setup.cfg,
-   * Makefile, go.mod. Returns JSON with:
+   * go.mod. Returns JSON with:
    *   runner         - executable name (e.g. 'node', 'cargo', 'pytest')
    *   command        - full command to run tests (e.g. 'npm test')
    *   framework      - test framework identifier (e.g. 'node:test', 'jest')
@@ -3133,31 +3182,8 @@ module.exports = {
 
     const NULL_RESULT = { runner: null, command: null, framework: null, test_directory: null };
 
-    // Helper: check if a file exists in targetDir
-    function fileExists(name) {
-      return fs.existsSync(path.join(targetDir, name));
-    }
-
-    // Helper: read a file from targetDir, returns null on failure
-    function readFile(name) {
-      try {
-        return fs.readFileSync(path.join(targetDir, name), 'utf8');
-      } catch {
-        return null;
-      }
-    }
-
-    // Helper: find test directory by checking common names
-    function findTestDir() {
-      const candidates = ['tests/', 'test/', '__tests__/', 'spec/', 'src/test/'];
-      for (const dir of candidates) {
-        if (fs.existsSync(path.join(targetDir, dir))) return dir;
-      }
-      return null;
-    }
-
     // --- Node.js / package.json ---
-    const pkgRaw = readFile('package.json');
+    const pkgRaw = _readFileIn(targetDir, 'package.json');
     if (pkgRaw) {
       try {
         const pkg = JSON.parse(pkgRaw);
@@ -3168,7 +3194,7 @@ module.exports = {
           if (/\bnode\s+--test\b/.test(testScript)) {
             // Extract test directory from the script if present
             const dirMatch = testScript.match(/node\s+--test\s+(\S+)/);
-            let testDir = dirMatch ? dirMatch[1] : findTestDir();
+            let testDir = dirMatch ? dirMatch[1] : _findTestDir(targetDir);
             if (testDir) {
               // Strip surrounding quotes
               testDir = testDir.replace(/^['"]|['"]$/g, '');
@@ -3180,56 +3206,56 @@ module.exports = {
                   if (/[*?[\]]/.test(part)) break;
                   baseParts.push(part);
                 }
-                testDir = baseParts.length > 0 ? baseParts.join('/') : findTestDir();
+                testDir = baseParts.length > 0 ? baseParts.join('/') : _findTestDir(targetDir);
               }
               // Ensure trailing slash for directories
               if (testDir && !testDir.endsWith('/')) testDir += '/';
             }
-            output({ runner: 'node', command: 'npm test', framework: 'node:test', test_directory: testDir || findTestDir() });
+            output({ runner: 'node', command: 'npm test', framework: 'node:test', test_directory: testDir || _findTestDir(targetDir) });
             return;
           }
 
           // Detect vitest
           if (/\bvitest\b/.test(testScript)) {
-            output({ runner: 'vitest', command: 'npm test', framework: 'vitest', test_directory: findTestDir() });
+            output({ runner: 'vitest', command: 'npm test', framework: 'vitest', test_directory: _findTestDir(targetDir) });
             return;
           }
 
           // Detect jest
           if (/\bjest\b/.test(testScript)) {
-            output({ runner: 'jest', command: 'npm test', framework: 'jest', test_directory: findTestDir() || '__tests__/' });
+            output({ runner: 'jest', command: 'npm test', framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/' });
             return;
           }
 
           // Detect mocha
           if (/\bmocha\b/.test(testScript)) {
-            output({ runner: 'mocha', command: 'npm test', framework: 'mocha', test_directory: findTestDir() || 'test/' });
+            output({ runner: 'mocha', command: 'npm test', framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/' });
             return;
           }
 
           // Detect tap/node-tap
           if (/\btap\b/.test(testScript)) {
-            output({ runner: 'tap', command: 'npm test', framework: 'tap', test_directory: findTestDir() || 'test/' });
+            output({ runner: 'tap', command: 'npm test', framework: 'tap', test_directory: _findTestDir(targetDir) || 'test/' });
             return;
           }
 
           // Detect ava
           if (/\bava\b/.test(testScript)) {
-            output({ runner: 'ava', command: 'npm test', framework: 'ava', test_directory: findTestDir() || 'test/' });
+            output({ runner: 'ava', command: 'npm test', framework: 'ava', test_directory: _findTestDir(targetDir) || 'test/' });
             return;
           }
 
           // Generic npm test fallback (has a test script but unrecognized runner)
-          output({ runner: 'npm', command: 'npm test', framework: 'unknown', test_directory: findTestDir() });
+          output({ runner: 'npm', command: 'npm test', framework: 'unknown', test_directory: _findTestDir(targetDir) });
           return;
         }
 
         // Check devDependencies for known test frameworks (no test script)
         const deps = { ...pkg.devDependencies, ...pkg.dependencies };
         if (deps) {
-          if (deps.vitest) { output({ runner: 'vitest', command: 'npx vitest', framework: 'vitest', test_directory: findTestDir() }); return; }
-          if (deps.jest) { output({ runner: 'jest', command: 'npx jest', framework: 'jest', test_directory: findTestDir() || '__tests__/' }); return; }
-          if (deps.mocha) { output({ runner: 'mocha', command: 'npx mocha', framework: 'mocha', test_directory: findTestDir() || 'test/' }); return; }
+          if (deps.vitest) { output({ runner: 'vitest', command: 'npx vitest', framework: 'vitest', test_directory: _findTestDir(targetDir) }); return; }
+          if (deps.jest) { output({ runner: 'jest', command: 'npx jest', framework: 'jest', test_directory: _findTestDir(targetDir) || '__tests__/' }); return; }
+          if (deps.mocha) { output({ runner: 'mocha', command: 'npx mocha', framework: 'mocha', test_directory: _findTestDir(targetDir) || 'test/' }); return; }
         }
       } catch {
         // Malformed package.json, continue to other checks
@@ -3237,38 +3263,38 @@ module.exports = {
     }
 
     // --- Rust / Cargo.toml ---
-    if (fileExists('Cargo.toml')) {
-      output({ runner: 'cargo', command: 'cargo test', framework: 'cargo:test', test_directory: findTestDir() || 'tests/' });
+    if (_fileExistsIn(targetDir, 'Cargo.toml')) {
+      output({ runner: 'cargo', command: 'cargo test', framework: 'cargo:test', test_directory: _findTestDir(targetDir) || 'tests/' });
       return;
     }
 
     // --- Python / pyproject.toml or setup.cfg ---
-    const pyprojectRaw = readFile('pyproject.toml');
+    const pyprojectRaw = _readFileIn(targetDir, 'pyproject.toml');
     if (pyprojectRaw) {
       if (/\[tool\.pytest\b/.test(pyprojectRaw) || /\bpytest\b/.test(pyprojectRaw)) {
-        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/' });
         return;
       }
       if (/\[tool\.unittest\b/.test(pyprojectRaw)) {
-        output({ runner: 'python', command: 'python -m unittest discover', framework: 'unittest', test_directory: findTestDir() || 'tests/' });
+        output({ runner: 'python', command: 'python -m unittest discover', framework: 'unittest', test_directory: _findTestDir(targetDir) || 'tests/' });
         return;
       }
-      // Generic Python project
-      output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+      // Generic Python project -- no pytest/unittest markers found; don't assume pytest
+      output(NULL_RESULT);
       return;
     }
 
-    const setupCfgRaw = readFile('setup.cfg');
+    const setupCfgRaw = _readFileIn(targetDir, 'setup.cfg');
     if (setupCfgRaw) {
       if (/\[tool:pytest\]/.test(setupCfgRaw)) {
-        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: _findTestDir(targetDir) || 'tests/' });
         return;
       }
     }
 
     // --- Go / go.mod ---
-    if (fileExists('go.mod')) {
-      output({ runner: 'go', command: 'go test ./...', framework: 'go:test', test_directory: findTestDir() || './' });
+    if (_fileExistsIn(targetDir, 'go.mod')) {
+      output({ runner: 'go', command: 'go test ./...', framework: 'go:test', test_directory: _findTestDir(targetDir) || './' });
       return;
     }
 
