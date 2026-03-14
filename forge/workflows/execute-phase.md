@@ -25,6 +25,14 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
+### Cost Baseline
+
+Record the starting cost baseline for this phase so subsequent snapshots can compute deltas:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
+```
+If the bridge file is missing, this outputs a warning but does not block execution.
+
 ## 2. Switch to Phase Branch
 
 Ensure commits land on the correct phase branch, not main. Use `branch-create` which is
@@ -165,7 +173,12 @@ Follow the same steps: claim, implement, verify, commit, close.
 
 ### Wait for Wave Completion
 
-After all agents in a wave complete, check results:
+After all agents in a wave complete, snapshot the cost delta for this wave:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
+```
+
+Then check results:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
