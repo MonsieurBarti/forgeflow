@@ -9,7 +9,7 @@
  *           config-get, config-set, config-list, config-clear, health,
  *           debug-list, debug-create, debug-update, todo-list, todo-create,
  *           milestone-list, milestone-audit, milestone-create, monorepo-create, remember, init-quick,
- *           cost-snapshot, cost-estimate, status
+ *           cost-snapshot, cost-estimate, status, help-context
  */
 
 const fs = require('fs');
@@ -3112,5 +3112,66 @@ module.exports = {
 
     const result = computeCostEstimate(phaseId);
     output({ phase_id: phaseId, ...result });
+  },
+
+  /**
+   * Detect current project state for the forge:help workflow.
+   *
+   * Returns structured JSON so the help workflow can decide between
+   * reference mode (existing project) and onboarding mode (no project).
+   *
+   * Usage: forge-tools help-context
+   *
+   * Output (onboarding):
+   *   { mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' }
+   *
+   * Output (reference):
+   *   { mode: 'reference', project_id, project_title, has_milestone, has_phases, active_phase_number }
+   */
+  'help-context'(_args) {
+    let project;
+    try {
+      project = resolveProject();
+    } catch (err) {
+      forgeError('BD_CONNECTION_ERROR', `Failed to detect project state: ${err.message}`, 'Check that bd is running and accessible');
+    }
+
+    if (!project) {
+      output({ mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' });
+      return;
+    }
+
+    // Gather milestone and phase information
+    let milestoneDetails, phases;
+    try {
+      const collected = collectProjectIssues(project.id);
+      milestoneDetails = collected.milestoneDetails;
+      phases = collected.phases;
+    } catch (err) {
+      forgeError('BD_CONNECTION_ERROR', `Failed to collect project data: ${err.message}`, 'Check that bd is running and accessible');
+    }
+
+    const hasMilestone = milestoneDetails.length > 0;
+    const hasPhases = phases.length > 0;
+
+    // Find active phase (in_progress first, then first open)
+    const activePhase = phases.find(p => p.status === 'in_progress')
+      || phases.find(p => p.status === 'open')
+      || null;
+
+    let activePhaseNumber = null;
+    if (activePhase) {
+      const match = (activePhase.title || '').match(/^Phase\s+([\d.]+)/i);
+      activePhaseNumber = match ? parseFloat(match[1]) : null;
+    }
+
+    output({
+      mode: 'reference',
+      project_id: project.id,
+      project_title: project.title,
+      has_milestone: hasMilestone,
+      has_phases: hasPhases,
+      active_phase_number: activePhaseNumber,
+    });
   },
 };
