@@ -9,7 +9,7 @@
  *           config-get, config-set, config-list, config-clear, health,
  *           debug-list, debug-create, debug-update, todo-list, todo-create,
  *           milestone-list, milestone-audit, milestone-create, monorepo-create, remember, init-quick,
- *           cost-snapshot, cost-estimate, status
+ *           cost-snapshot, cost-estimate, status, detect-test-runner
  */
 
 const fs = require('fs');
@@ -3112,5 +3112,153 @@ module.exports = {
 
     const result = computeCostEstimate(phaseId);
     output({ phase_id: phaseId, ...result });
+  },
+
+  /**
+   * Auto-detect the project's test runner by inspecting config files.
+   *
+   * Checks (in order): package.json, Cargo.toml, pyproject.toml, setup.cfg,
+   * Makefile, go.mod. Returns JSON with:
+   *   runner         - executable name (e.g. 'node', 'cargo', 'pytest')
+   *   command        - full command to run tests (e.g. 'npm test')
+   *   framework      - test framework identifier (e.g. 'node:test', 'jest')
+   *   test_directory - directory containing tests (e.g. 'tests/')
+   *
+   * All fields are null when no recognizable config is found.
+   *
+   * Usage: forge-tools detect-test-runner [directory]
+   */
+  'detect-test-runner'(args) {
+    const targetDir = args[0] ? path.resolve(args[0]) : process.cwd();
+
+    const NULL_RESULT = { runner: null, command: null, framework: null, test_directory: null };
+
+    // Helper: check if a file exists in targetDir
+    function fileExists(name) {
+      return fs.existsSync(path.join(targetDir, name));
+    }
+
+    // Helper: read a file from targetDir, returns null on failure
+    function readFile(name) {
+      try {
+        return fs.readFileSync(path.join(targetDir, name), 'utf8');
+      } catch {
+        return null;
+      }
+    }
+
+    // Helper: find test directory by checking common names
+    function findTestDir() {
+      const candidates = ['tests/', 'test/', '__tests__/', 'spec/', 'src/test/'];
+      for (const dir of candidates) {
+        if (fs.existsSync(path.join(targetDir, dir))) return dir;
+      }
+      return null;
+    }
+
+    // --- Node.js / package.json ---
+    const pkgRaw = readFile('package.json');
+    if (pkgRaw) {
+      try {
+        const pkg = JSON.parse(pkgRaw);
+        const testScript = pkg.scripts && pkg.scripts.test;
+
+        if (testScript) {
+          // Detect node built-in test runner
+          if (/\bnode\s+--test\b/.test(testScript)) {
+            // Extract test directory from the script if present
+            const dirMatch = testScript.match(/node\s+--test\s+(\S+)/);
+            let testDir = dirMatch ? dirMatch[1] : findTestDir();
+            // Ensure trailing slash for directories
+            if (testDir && !testDir.endsWith('/')) testDir += '/';
+            output({ runner: 'node', command: 'npm test', framework: 'node:test', test_directory: testDir || findTestDir() });
+            return;
+          }
+
+          // Detect vitest
+          if (/\bvitest\b/.test(testScript)) {
+            output({ runner: 'vitest', command: 'npm test', framework: 'vitest', test_directory: findTestDir() });
+            return;
+          }
+
+          // Detect jest
+          if (/\bjest\b/.test(testScript)) {
+            output({ runner: 'jest', command: 'npm test', framework: 'jest', test_directory: findTestDir() || '__tests__/' });
+            return;
+          }
+
+          // Detect mocha
+          if (/\bmocha\b/.test(testScript)) {
+            output({ runner: 'mocha', command: 'npm test', framework: 'mocha', test_directory: findTestDir() || 'test/' });
+            return;
+          }
+
+          // Detect tap/node-tap
+          if (/\btap\b/.test(testScript)) {
+            output({ runner: 'tap', command: 'npm test', framework: 'tap', test_directory: findTestDir() || 'test/' });
+            return;
+          }
+
+          // Detect ava
+          if (/\bava\b/.test(testScript)) {
+            output({ runner: 'ava', command: 'npm test', framework: 'ava', test_directory: findTestDir() || 'test/' });
+            return;
+          }
+
+          // Generic npm test fallback (has a test script but unrecognized runner)
+          output({ runner: 'npm', command: 'npm test', framework: 'unknown', test_directory: findTestDir() });
+          return;
+        }
+
+        // Check devDependencies for known test frameworks (no test script)
+        const deps = { ...pkg.devDependencies, ...pkg.dependencies };
+        if (deps) {
+          if (deps.vitest) { output({ runner: 'vitest', command: 'npx vitest', framework: 'vitest', test_directory: findTestDir() }); return; }
+          if (deps.jest) { output({ runner: 'jest', command: 'npx jest', framework: 'jest', test_directory: findTestDir() || '__tests__/' }); return; }
+          if (deps.mocha) { output({ runner: 'mocha', command: 'npx mocha', framework: 'mocha', test_directory: findTestDir() || 'test/' }); return; }
+        }
+      } catch {
+        // Malformed package.json, continue to other checks
+      }
+    }
+
+    // --- Rust / Cargo.toml ---
+    if (fileExists('Cargo.toml')) {
+      output({ runner: 'cargo', command: 'cargo test', framework: 'cargo:test', test_directory: findTestDir() || 'tests/' });
+      return;
+    }
+
+    // --- Python / pyproject.toml or setup.cfg ---
+    const pyprojectRaw = readFile('pyproject.toml');
+    if (pyprojectRaw) {
+      if (/\[tool\.pytest\b/.test(pyprojectRaw) || /\bpytest\b/.test(pyprojectRaw)) {
+        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+        return;
+      }
+      if (/\[tool\.unittest\b/.test(pyprojectRaw)) {
+        output({ runner: 'python', command: 'python -m unittest discover', framework: 'unittest', test_directory: findTestDir() || 'tests/' });
+        return;
+      }
+      // Generic Python project
+      output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+      return;
+    }
+
+    const setupCfgRaw = readFile('setup.cfg');
+    if (setupCfgRaw) {
+      if (/\[tool:pytest\]/.test(setupCfgRaw)) {
+        output({ runner: 'pytest', command: 'pytest', framework: 'pytest', test_directory: findTestDir() || 'tests/' });
+        return;
+      }
+    }
+
+    // --- Go / go.mod ---
+    if (fileExists('go.mod')) {
+      output({ runner: 'go', command: 'go test ./...', framework: 'go:test', test_directory: findTestDir() || './' });
+      return;
+    }
+
+    // --- No recognizable test config ---
+    output(NULL_RESULT);
   },
 };
