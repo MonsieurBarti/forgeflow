@@ -102,7 +102,7 @@ module.exports = {
         number: findings.length + 1,
         severity: 'blocker',
         description: `${tasksWithoutCriteria.length} task(s) are missing acceptance criteria: ${taskList}`,
-        fix: `Run: bd update <task-id> --acceptance_criteria="<specific, testable criteria>" for each task listed above.`,
+        fix: `Run: bd update <task-id> --acceptance="<specific, testable criteria>" for each task listed above.`,
       });
     }
 
@@ -126,6 +126,7 @@ module.exports = {
         (i.labels || []).includes('forge:req')
       );
 
+      // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Needs bd CLI batch-query support.
       for (const req of requirements) {
         const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
         let deps = [];
@@ -197,6 +198,7 @@ module.exports = {
     const blockerDeps = Array.isArray(deps)
       ? deps.filter(d => d.type === 'blocks' || d.type === 'predecessor' || d.type === 'blocked-by')
       : [];
+    // TODO(perf): N+1 subprocess -- calls bd show per blocker dep. Needs bd CLI batch-query support.
     const openBlockers = [];
     for (const dep of blockerDeps) {
       const blockerId = dep.from || dep.source || dep.id;
@@ -265,8 +267,10 @@ module.exports = {
 
     const phaseTaskIds = new Set(tasks.map(t => t.id));
 
-    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
-    // Requires bd CLI bulk query support to optimize further.
+    // Build taskById Map before the dep loop for O(1) lookups
+    const taskById = new Map(tasks.map(t => [t.id, t]));
+
+    // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
     const taskDeps = {};
     for (const task of tasks) {
       const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
@@ -279,7 +283,7 @@ module.exports = {
         .filter(d => phaseTaskIds.has(d.id || d.dependency_id || d))
         .map(d => d.id || d.dependency_id || d)
         .filter(id => {
-          const depTask = tasks.find(t => t.id === id);
+          const depTask = taskById.get(id);
           return depTask && depTask.status !== 'closed';
         });
       taskDeps[task.id] = intraPhaseDeps;
@@ -288,11 +292,9 @@ module.exports = {
     // Kahn's algorithm: O(V+E) topological sort into dependency waves
     const inDegree = {};
     const dependents = {}; // taskId -> list of tasks that depend on it
-    const taskById = {};
     for (const task of tasks) {
       inDegree[task.id] = (taskDeps[task.id] || []).length;
       dependents[task.id] = [];
-      taskById[task.id] = task;
     }
     for (const task of tasks) {
       for (const depId of (taskDeps[task.id] || [])) {
@@ -322,7 +324,7 @@ module.exports = {
         for (const depId of (dependents[t.id] || [])) {
           inDegree[depId]--;
           if (inDegree[depId] === 0) {
-            nextWave.push(taskById[depId]);
+            nextWave.push(taskById.get(depId));
           }
         }
       }
@@ -456,8 +458,7 @@ module.exports = {
     const children = bdJson(`children ${phaseId}`);
     const tasks = normalizeChildren(children);
 
-    // NOTE: N+1 subprocess pattern -- calls bd show per task.
-    // Requires bd CLI bulk query support to optimize further.
+    // TODO(perf): N+1 subprocess -- calls bd show per task. Needs bd CLI batch-query support.
     const enrichedTasks = tasks.map(task => {
       const raw = bdJson(`show ${task.id}`);
       const full = Array.isArray(raw) ? raw[0] : raw;
@@ -711,6 +712,7 @@ module.exports = {
     });
     const predecessorId = predecessorDep ? (predecessorDep.dependency_id || predecessorDep.id || predecessorDep) : null;
 
+    // TODO(perf): N+1 subprocess -- calls bd dep list per phase to find successors. Needs bd CLI batch-query support.
     const successors = [];
     for (const phase of phases) {
       if (phase.id === targetPhase.id) continue;
@@ -967,6 +969,7 @@ module.exports = {
     const effectivenessRatings = {};
     let phaseCount = 0;
 
+    // TODO(perf): N+1 subprocess -- calls bd comments per closed phase. Needs bd CLI batch-query support.
     for (const phase of phases) {
       const comments = bdJson(`comments ${phase.id}`);
       if (!comments) continue;

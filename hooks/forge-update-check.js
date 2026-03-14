@@ -62,21 +62,13 @@ async function main() {
 
     // Try to find source package.json (if we're in the forge repo)
     let sourceVersion = null;
-    const candidates = [
-      // Common locations relative to cwd
-      path.join(process.cwd(), 'package.json'),
-    ];
-
-    for (const candidate of candidates) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-        if (pkg.name === 'forge') {
-          sourceVersion = pkg.version;
-          break;
-        }
-      } catch {
-        continue;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+      if (pkg.name === 'forge') {
+        sourceVersion = pkg.version;
       }
+    } catch {
+      // package.json missing or not the forge repo — skip
     }
 
     // Update state
@@ -84,7 +76,7 @@ async function main() {
     state.installed_version = installedVersion;
     state.source_version = sourceVersion;
     fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state), { mode: 0o600 });
 
     // Compare versions if both available
     if (sourceVersion && installedVersion && sourceVersion !== installedVersion) {
@@ -126,7 +118,11 @@ function checkDrift() {
     try {
       const absPath = path.join(claudeDir, relPath);
       // Validate path stays within claudeDir to prevent traversal
-      if (!path.resolve(absPath).startsWith(resolvedClaudeDir)) continue;
+      if (!path.resolve(absPath).startsWith(resolvedClaudeDir)) {
+        console.error(`[forge] Drift check: skipping path outside claudeDir: ${relPath}`);
+        driftCount++;
+        continue;
+      }
       const content = fs.readFileSync(absPath);
       const actualHash = crypto.createHash('sha256').update(content).digest('hex');
       if (actualHash !== expectedHash) {

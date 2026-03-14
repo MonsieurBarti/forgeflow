@@ -163,9 +163,11 @@ function restartDolt() {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     // Give Dolt a moment to become ready.
-    // NOTE: Synchronous sleep via Atomics.wait blocks the event loop for 2s.
-    // The execFileSync-based architecture prevents using async alternatives here.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+    // INTENTIONAL: Synchronous sleep via Atomics.wait blocks the event loop.
+    // The entire forge-tools pipeline is synchronous (execFileSync-based), so
+    // async alternatives cannot be used without a full architecture migration.
+    // Migrate to async when the command layer supports it.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   } catch (_) {
     // Ignore restart errors; the retry will surface the real failure
   }

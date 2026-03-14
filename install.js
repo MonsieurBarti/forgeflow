@@ -144,7 +144,7 @@ function registerHooks() {
     fs.copyFileSync(srcPkg, destPkg);
   }
 
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), { mode: 0o600 });
 }
 
 /**
