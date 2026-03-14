@@ -261,7 +261,12 @@ module.exports = {
     const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
-      output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
+      output({
+        phase_id: phaseId,
+        waves: [],
+        summary: { total_tasks: 0, total_waves: 0 },
+        suggestion: 'No tasks in this phase. Add tasks with: bd create --title "<task>" --parent ' + phaseId
+      });
       return;
     }
 
@@ -437,7 +442,10 @@ module.exports = {
     }
 
     if (!checkpoint) {
-      output({});
+      output({
+        found: false,
+        suggestion: 'No checkpoint found for this phase. Save one with: forge-tools checkpoint-save ' + phaseId
+      });
       return;
     }
 
@@ -832,7 +840,11 @@ module.exports = {
 
     const children = bdJson(`children ${projectId}`);
     if (!children) {
-      output({ found: false, phase: null });
+      output({
+        found: false,
+        phase: null,
+        suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId
+      });
       return;
     }
 
@@ -850,7 +862,13 @@ module.exports = {
     if (found) {
       output({ found: true, phase: found.phase });
     } else {
-      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })) });
+      const availNums = numbered.map(e => e.n).join(', ');
+      output({
+        found: false,
+        phase: null,
+        available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })),
+        suggestion: 'Phase ' + num + ' does not exist. Available phases: ' + availNums + '. Use: forge-tools resolve-phase ' + projectId + ' <number>'
+      });
     }
   },
 
@@ -909,7 +927,11 @@ module.exports = {
 
     const comments = bdJson(`comments ${phaseId}`);
     if (!comments) {
-      output({ phaseId, contexts: [] });
+      output({
+        phaseId,
+        contexts: [],
+        suggestion: 'No context written yet. Write context with: forge-tools context-write ' + phaseId + ' <json-string>'
+      });
       return;
     }
 

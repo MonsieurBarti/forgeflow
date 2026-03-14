@@ -49,7 +49,8 @@ module.exports = {
     const branch = `forge/m-${milestoneId}`;
 
     if (fs.existsSync(wtPath)) {
-      output({ created: false, path: wtPath, branch, reason: 'already_exists' });
+      const hint = 'Worktree already exists at ' + wtPath + '. Use it directly or remove with: forge-tools worktree-remove ' + milestoneId;
+      output({ created: false, path: wtPath, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -88,7 +89,7 @@ module.exports = {
     const wtPath = safeWorktreePath(milestoneId);
 
     if (!fs.existsSync(wtPath)) {
-      output({ removed: false, reason: 'not_found' });
+      output({ removed: false, reason: 'not_found', suggestion: 'Worktree not found. List existing worktrees with: git worktree list' });
       return;
     }
 
@@ -134,7 +135,8 @@ module.exports = {
     const existing = git(['branch', '--list', branch], { allowFail: true });
     if (existing) {
       git(['checkout', branch]);
-      output({ created: false, branch, reason: 'already_exists' });
+      const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -227,7 +229,8 @@ module.exports = {
     // Idempotency: if a PR already exists for this branch, return it
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
-      return output({ created: false, url: existing, branch, base, title });
+      const hint = 'A PR already exists for this branch. View it at: ' + existing;
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
     }
 
     try {
@@ -258,7 +261,8 @@ module.exports = {
     const existing = git(['branch', '--list', branch], { allowFail: true });
     if (existing) {
       git(['checkout', branch]);
-      output({ created: false, branch, reason: 'already_exists' });
+      const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -299,7 +303,8 @@ module.exports = {
     // Idempotency: if a PR already exists for this branch, return it
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
-      return output({ created: false, url: existing, branch, base, title });
+      const hint = 'A PR already exists for this branch. View it at: ' + existing;
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
     }
 
     try {

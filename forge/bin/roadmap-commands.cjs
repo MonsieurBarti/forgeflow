@@ -17,14 +17,15 @@ module.exports = {
    */
   'migrate-orphan-phases'() {
     const projectsRaw = bd('list --label forge:project --json', { allowFail: true });
+    const noProjectHint = 'Run /forge:new to create a project before migrating phases';
     if (!projectsRaw) {
-      output({ ok: true, message: 'No projects found', actions: [] });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
       return;
     }
     const projectsData = JSON.parse(projectsRaw);
     const projects = Array.isArray(projectsData) ? projectsData : (projectsData.issues || []);
     if (projects.length === 0) {
-      output({ ok: true, message: 'No projects found', actions: [] });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
       return;
     }
 

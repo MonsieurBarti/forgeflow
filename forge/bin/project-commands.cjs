@@ -1527,7 +1527,10 @@ module.exports = {
       }
     }
 
-    output({ found: false });
+    output({
+      found: false,
+      suggestion: 'Run /forge:new to initialize a project, or check that bd is running with: bd list'
+    });
   },
 
   /**
@@ -1775,7 +1778,11 @@ module.exports = {
     }
 
     if (!project) {
-      output({ found: false, memories: memories || null });
+      output({
+        found: false,
+        memories: memories || null,
+        suggestion: 'No project found. Run /forge:new to create a project, then /forge:plan to set up phases before resuming'
+      });
       return;
     }
 
@@ -1814,7 +1821,11 @@ module.exports = {
 
     const project = bdJson(`show ${projectId}`);
     if (!project) {
-      output({ error: 'Project not found', project_id: projectId });
+      output({
+        error: 'Project not found',
+        project_id: projectId,
+        suggestion: 'Verify the project ID with: bd show ' + projectId + ', or run /forge:new to create a new project'
+      });
       return;
     }
 
@@ -2446,8 +2457,9 @@ module.exports = {
    */
   'debug-list'() {
     const result = bd('list --label forge:debug --status open --json', { allowFail: true });
+    const debugHint = 'No active debug sessions. Start one with: forge-tools debug-create <slug>';
     if (!result) {
-      output({ sessions: [] });
+      output({ sessions: [], suggestion: debugHint });
       return;
     }
     try {
@@ -2462,7 +2474,7 @@ module.exports = {
       }));
       output({ sessions });
     } catch {
-      output({ sessions: [] });
+      output({ sessions: [], suggestion: debugHint });
     }
   },
 
@@ -2524,9 +2536,10 @@ module.exports = {
    * List pending forge:todo beads.
    */
   'todo-list'() {
+    const todoHint = 'No open todos. Create one with: forge-tools todo-create <project-id> <title>';
     const result = bd('list --label forge:todo --status open --json', { allowFail: true });
     if (!result) {
-      output({ todo_count: 0, todos: [] });
+      output({ todo_count: 0, todos: [], suggestion: todoHint });
       return;
     }
     try {
@@ -2542,7 +2555,7 @@ module.exports = {
       }));
       output({ todo_count: todos.length, todos });
     } catch {
-      output({ todo_count: 0, todos: [] });
+      output({ todo_count: 0, todos: [], suggestion: todoHint });
     }
   },
 
