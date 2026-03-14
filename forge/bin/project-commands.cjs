@@ -1689,16 +1689,9 @@ module.exports = {
       return;
     }
 
-    const issues = normalizeChildren(bdJson(`children ${projectId}`));
+    const { phases, requirements } = collectProjectIssues(projectId);
 
-    const phases = issues.filter(i =>
-      (i.labels || []).includes('forge:phase') || i.issue_type === 'epic'
-    ).filter(i => i.id !== projectId);
-    const requirements = issues.filter(i =>
-      (i.labels || []).includes('forge:req') || i.issue_type === 'feature'
-    );
-
-    const diagnostics = { structure: [], dependencies: [], state: [], config: [], installation: [] };
+    const diagnostics = { structure: [], dependencies: [], state: [], config: [], installation: [], orphans: [] };
 
     const hasProjectLabel = (project.labels || []).includes('forge:project');
     diagnostics.structure.push({
@@ -1948,12 +1941,44 @@ module.exports = {
       severity: versionOk ? 'ok' : 'warning',
     });
 
+    // Orphan detection: find forge-labeled beads with no parent-child dependency
+    const orphans = [];
+    const forgeBeads = [
+      ...phases.map(p => ({ ...p, forge_label: 'forge:phase' })),
+      ...allTasks.filter(t => (t.labels || []).includes('forge:task')).map(t => ({ ...t, forge_label: 'forge:task' })),
+    ];
+    for (const bead of forgeBeads) {
+      const depOutput = bd(`dep list ${bead.id} --direction=up --type=parent-child`, { allowFail: true });
+      const hasParent = depOutput && depOutput.trim() !== '' && !depOutput.includes('No dependencies');
+      if (!hasParent) {
+        // Suggest the project itself as parent for phases, or the phase for tasks
+        const suggestedParent = bead.forge_label === 'forge:phase' ? projectId : (bead.phase_id || projectId);
+        orphans.push({
+          id: bead.id,
+          title: bead.title,
+          label: bead.forge_label,
+          suggested_fix: `bd dep add ${bead.id} ${suggestedParent} --type=parent-child`,
+        });
+      }
+    }
+
+    diagnostics.orphans.push({
+      check: 'orphan_beads',
+      ok: orphans.length === 0,
+      message: orphans.length === 0
+        ? 'No orphan beads found'
+        : `${orphans.length} orphan bead(s) found without parent-child dependency`,
+      severity: orphans.length > 0 ? 'warning' : 'ok',
+      details: orphans,
+    });
+
     const allChecks = [
       ...diagnostics.structure,
       ...diagnostics.dependencies,
       ...diagnostics.state,
       ...diagnostics.config,
       ...diagnostics.installation,
+      ...diagnostics.orphans,
     ];
     const errors = allChecks.filter(c => !c.ok && (c.severity === 'error' || c.fixable));
     const warnings = allChecks.filter(c => !c.ok && c.severity === 'warning');
