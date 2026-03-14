@@ -15,7 +15,8 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
-const STATE_FILE = path.join(os.tmpdir(), 'forge-update-check.json');
+const CACHE_DIR = path.join(os.homedir(), '.cache', 'forge');
+const STATE_FILE = path.join(CACHE_DIR, 'forge-update-check.json');
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function main() {
@@ -64,8 +65,6 @@ async function main() {
     const candidates = [
       // Common locations relative to cwd
       path.join(process.cwd(), 'package.json'),
-      // The forge source dir if it exists
-      path.join(os.homedir(), 'gt', 'forge', 'package.json'),
     ];
 
     for (const candidate of candidates) {
@@ -84,6 +83,7 @@ async function main() {
     state.last_check = now;
     state.installed_version = installedVersion;
     state.source_version = sourceVersion;
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
 
     // Compare versions if both available
@@ -121,9 +121,12 @@ function checkDrift() {
   if (!manifest.files || typeof manifest.files !== 'object') return;
 
   let driftCount = 0;
+  const resolvedClaudeDir = path.resolve(claudeDir) + path.sep;
   for (const [relPath, expectedHash] of Object.entries(manifest.files)) {
     try {
       const absPath = path.join(claudeDir, relPath);
+      // Validate path stays within claudeDir to prevent traversal
+      if (!path.resolve(absPath).startsWith(resolvedClaudeDir)) continue;
       const content = fs.readFileSync(absPath);
       const actualHash = crypto.createHash('sha256').update(content).digest('hex');
       if (actualHash !== expectedHash) {

@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { homedir } = require('os');
 const {
-  bd, bdArgs, bdJson, output, forgeError,
+  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -23,18 +23,6 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
-
-// ---------------------------------------------------------------------------
-// Shared helpers (extracted to reduce duplication)
-// ---------------------------------------------------------------------------
-
-/**
- * Normalize the result of bdJson('children ...') into a flat array.
- * bd may return an array directly, or an object with .issues / .children.
- */
-function normalizeChildren(raw) {
-  return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
-}
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -640,8 +628,6 @@ function generateDashboardHTML(data) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(projectTitle)} - Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #09090b;
@@ -664,7 +650,7 @@ function generateDashboardHTML(data) {
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
@@ -672,7 +658,7 @@ function generateDashboardHTML(data) {
   }
 
   code, .mono {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.8em;
     color: var(--text-muted);
   }
@@ -1074,7 +1060,7 @@ function generateDashboardHTML(data) {
   }
   .task-details pre {
     white-space: pre-wrap;
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.72rem;
     margin-top: 0.25rem;
   }
@@ -1933,13 +1919,25 @@ module.exports = {
       severity: versionOk ? 'ok' : 'warning',
     });
 
-    // Orphan detection: find forge-labeled beads with no parent-child dependency
+    // Orphan detection: find forge-labeled beads with no parent-child dependency.
+    // Use phaseChildrenMap to skip beads already known to have parents (avoids N+1 bd calls).
+    const beadsWithKnownParent = new Set();
+    for (const [, phaseTasks] of phaseChildrenMap) {
+      for (const t of phaseTasks) {
+        beadsWithKnownParent.add(t.id);
+      }
+    }
+    // Phases that are children of milestones are also known to have parents
+    // (they were fetched via bdJson(`children ${ms.id}`) in the milestone traversal above).
+
     const orphans = [];
     const forgeBeads = [
       ...phases.map(p => ({ ...p, forge_label: 'forge:phase' })),
       ...allTasks.filter(t => (t.labels || []).includes('forge:task')).map(t => ({ ...t, forge_label: 'forge:task' })),
     ];
     for (const bead of forgeBeads) {
+      // Skip beads already known to have a parent from phaseChildrenMap
+      if (beadsWithKnownParent.has(bead.id)) continue;
       const depOutput = bd(`dep list ${bead.id} --direction=up --type=parent-child`, { allowFail: true });
       const hasParent = depOutput && depOutput.trim() !== '' && !depOutput.includes('No dependencies');
       if (!hasParent) {

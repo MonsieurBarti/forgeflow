@@ -10,7 +10,31 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bdJson, git, gh, output, forgeError } = require('./core.cjs');
+const { bdJson, git, gh, output, forgeError, normalizeChildren } = require('./core.cjs');
+
+/**
+ * Validate a bead/milestone ID to prevent path traversal.
+ * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
+ */
+function validateId(id) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
+  }
+}
+
+/**
+ * Resolve a worktree path and verify it stays within the expected base directory.
+ */
+function safeWorktreePath(milestoneId) {
+  validateId(milestoneId);
+  const baseDir = path.join(process.cwd(), '.forge', 'worktrees');
+  const wtPath = path.join(baseDir, milestoneId);
+  const resolved = path.resolve(wtPath);
+  if (!resolved.startsWith(path.resolve(baseDir) + path.sep) && resolved !== path.resolve(baseDir)) {
+    forgeError('INVALID_INPUT', 'Path traversal detected', 'IDs must not contain path separators or traversal sequences');
+  }
+  return wtPath;
+}
 
 module.exports = {
   /**
@@ -21,7 +45,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-create <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
     const branch = `forge/m-${milestoneId}`;
 
     if (fs.existsSync(wtPath)) {
@@ -48,7 +72,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-path <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
     const exists = fs.existsSync(wtPath);
     output({ path: wtPath, exists });
   },
@@ -61,7 +85,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools worktree-remove <milestone-id>');
     }
-    const wtPath = path.join(process.cwd(), '.forge', 'worktrees', milestoneId);
+    const wtPath = safeWorktreePath(milestoneId);
 
     if (!fs.existsSync(wtPath)) {
       output({ removed: false, reason: 'not_found' });
@@ -146,8 +170,10 @@ module.exports = {
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
+    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
+    // Requires bd CLI bulk query support to optimize further.
     const reqCoverage = [];
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
@@ -256,7 +282,7 @@ module.exports = {
     const quickRaw = bdJson(`show ${quickId}`);
     const quick = Array.isArray(quickRaw) ? quickRaw[0] : quickRaw;
     const children = bdJson(`children ${quickId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const taskLines = tasks.map(t => {
       const status = t.status === 'closed' ? 'x' : ' ';
@@ -286,7 +312,7 @@ module.exports = {
       ]);
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
-      output({ created: false, error: err.message, branch, base });
+      forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools quick-pr-create <quick-id>', { branch, base });
     }
   },
 };

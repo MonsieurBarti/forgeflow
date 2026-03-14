@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  bd, bdArgs, bdJson, output, forgeError,
+  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
 } = require('./core.cjs');
 
 module.exports = {
@@ -29,7 +29,7 @@ module.exports = {
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
     const inProgress = tasks.filter(t => t.status === 'in_progress');
@@ -64,7 +64,7 @@ module.exports = {
     }
 
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
     output({ phase_id: phaseId, ready_tasks: ready });
@@ -81,7 +81,7 @@ module.exports = {
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const findings = [];
     const tasksWithoutCriteria = [];
@@ -121,9 +121,7 @@ module.exports = {
     let uncoveredReqs = [];
     if (parentId) {
       const projectChildren = bdJson(`children ${parentId}`);
-      const allIssues = Array.isArray(projectChildren)
-        ? projectChildren
-        : (projectChildren?.issues || projectChildren?.children || []);
+      const allIssues = normalizeChildren(projectChildren);
       const requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
       );
@@ -187,7 +185,7 @@ module.exports = {
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     const issues = [];
 
@@ -258,7 +256,7 @@ module.exports = {
 
     const phase = bdJson(`show ${phaseId}`);
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
       output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
@@ -267,6 +265,8 @@ module.exports = {
 
     const phaseTaskIds = new Set(tasks.map(t => t.id));
 
+    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
+    // Requires bd CLI bulk query support to optimize further.
     const taskDeps = {};
     for (const task of tasks) {
       const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
@@ -285,44 +285,63 @@ module.exports = {
       taskDeps[task.id] = intraPhaseDeps;
     }
 
-    const waves = [];
-    const assigned = new Set();
-
-    while (assigned.size < tasks.length) {
-      const wave = [];
-      for (const task of tasks) {
-        if (assigned.has(task.id)) continue;
-        const unmetDeps = (taskDeps[task.id] || []).filter(d => !assigned.has(d));
-        if (unmetDeps.length === 0) {
-          wave.push(task);
+    // Kahn's algorithm: O(V+E) topological sort into dependency waves
+    const inDegree = {};
+    const dependents = {}; // taskId -> list of tasks that depend on it
+    const taskById = {};
+    for (const task of tasks) {
+      inDegree[task.id] = (taskDeps[task.id] || []).length;
+      dependents[task.id] = [];
+      taskById[task.id] = task;
+    }
+    for (const task of tasks) {
+      for (const depId of (taskDeps[task.id] || [])) {
+        if (dependents[depId]) {
+          dependents[depId].push(task.id);
         }
       }
+    }
 
-      if (wave.length === 0) {
-        const remaining = tasks.filter(t => !assigned.has(t.id));
-        waves.push({
-          wave_number: waves.length + 1,
-          tasks: remaining.map(t => ({
-            id: t.id,
-            title: t.title,
-            status: t.status,
-            blocked_by: taskDeps[t.id] || [],
-          })),
-          note: 'circular_or_external_dependency',
-        });
-        break;
-      }
+    const waves = [];
+    const assigned = new Set();
+    // Seed: all tasks with zero in-degree
+    let currentWave = tasks.filter(t => inDegree[t.id] === 0);
 
+    while (currentWave.length > 0) {
       waves.push({
         wave_number: waves.length + 1,
-        tasks: wave.map(t => ({
+        tasks: currentWave.map(t => ({
           id: t.id,
           title: t.title,
           status: t.status,
         })),
       });
+      const nextWave = [];
+      for (const t of currentWave) {
+        assigned.add(t.id);
+        for (const depId of (dependents[t.id] || [])) {
+          inDegree[depId]--;
+          if (inDegree[depId] === 0) {
+            nextWave.push(taskById[depId]);
+          }
+        }
+      }
+      currentWave = nextWave;
+    }
 
-      for (const t of wave) assigned.add(t.id);
+    // Handle circular or external dependencies (remaining unassigned tasks)
+    if (assigned.size < tasks.length) {
+      const remaining = tasks.filter(t => !assigned.has(t.id));
+      waves.push({
+        wave_number: waves.length + 1,
+        tasks: remaining.map(t => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          blocked_by: taskDeps[t.id] || [],
+        })),
+        note: 'circular_or_external_dependency',
+      });
     }
 
     const executableWaves = waves.map(w => ({
@@ -435,8 +454,10 @@ module.exports = {
     const phaseRaw = bdJson(`show ${phaseId}`);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
     const children = bdJson(`children ${phaseId}`);
-    const tasks = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const tasks = normalizeChildren(children);
 
+    // NOTE: N+1 subprocess pattern -- calls bd show per task.
+    // Requires bd CLI bulk query support to optimize further.
     const enrichedTasks = tasks.map(task => {
       const raw = bdJson(`show ${task.id}`);
       const full = Array.isArray(raw) ? raw[0] : raw;
@@ -456,9 +477,7 @@ module.exports = {
     let requirements = [];
     if (parentId) {
       const projectChildren = bdJson(`children ${parentId}`);
-      const allIssues = Array.isArray(projectChildren)
-        ? projectChildren
-        : (projectChildren?.issues || projectChildren?.children || []);
+      const allIssues = normalizeChildren(projectChildren);
       requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
       );
@@ -495,7 +514,7 @@ module.exports = {
     }
 
     const children = bdJson(`children ${milestoneId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let maxPhaseNum = 0;
@@ -566,7 +585,7 @@ module.exports = {
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let targetPhase = null;
@@ -652,7 +671,7 @@ module.exports = {
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     let targetPhase = null;
@@ -673,7 +692,7 @@ module.exports = {
     }
 
     const phaseChildren = bdJson(`children ${targetPhase.id}`);
-    const tasks = Array.isArray(phaseChildren) ? phaseChildren : (phaseChildren?.issues || phaseChildren?.children || []);
+    const tasks = normalizeChildren(phaseChildren);
     if (tasks.length > 0 && !force) {
       forgeError('INVALID_STATE', `Phase ${phaseNum} has ${tasks.length} tasks`, 'Use --force flag to remove anyway: forge-tools remove-phase <project-id> <phase-number> --force', { phaseNumber: phaseNum, taskCount: tasks.length });
     }
@@ -746,7 +765,7 @@ module.exports = {
           ? `${item.num - 1}.${item.decimal}`
           : `${item.num - 1}`;
         const newTitle = `Phase ${newNum}: ${item.rest}`;
-        bd(`update ${item.phase.id} --title="${newTitle}"`);
+        bdArgs(['update', item.phase.id, `--title=${newTitle}`]);
         renumbered.push({ id: item.phase.id, old_title: item.phase.title, new_title: newTitle });
       }
     }
@@ -774,7 +793,7 @@ module.exports = {
     }
 
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
     const parsed = phases.map(p => {
@@ -815,7 +834,7 @@ module.exports = {
       return;
     }
 
-    const issues = Array.isArray(children) ? children : (children.issues || children.children || []);
+    const issues = normalizeChildren(children);
     const phases = issues.filter(i =>
       (i.labels || []).includes('forge:phase') && i.id !== projectId
     );
@@ -922,7 +941,7 @@ module.exports = {
 
     // Two-level traversal: project -> milestones -> phases (milestone hierarchy from Phase 9.1)
     const children = bdJson(`children ${projectId}`);
-    const issues = Array.isArray(children) ? children : (children?.issues || children?.children || []);
+    const issues = normalizeChildren(children);
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
     const allIssues = [];
     const seenIds = new Set();
@@ -935,7 +954,7 @@ module.exports = {
     };
     for (const ms of milestones) {
       const msChildren = bdJson(`children ${ms.id}`);
-      const msIssues = Array.isArray(msChildren) ? msChildren : (msChildren?.issues || msChildren?.children || []);
+      const msIssues = normalizeChildren(msChildren);
       addIssues(msIssues);
     }
     addIssues(issues); // Also collect legacy direct children

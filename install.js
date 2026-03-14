@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 const SRC = __dirname;
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
@@ -256,7 +257,6 @@ function main() {
 
   // Check prerequisites
   try {
-    const { execFileSync } = require('child_process');
     execFileSync('bd', ['--version'], { stdio: 'pipe' });
   } catch {
     console.error('  Error: beads (bd) not found. Install it first:');
