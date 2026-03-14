@@ -24,8 +24,17 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" verify-phase <phase-id>
 This returns all tasks with their acceptance criteria pre-loaded, separated into
 closed (to verify) and open (still pending) lists.
 
-When running automated verification (step 3), spawn a **forge-verifier** agent
-for parallel verification of multiple tasks. For single-task phases, verify inline.
+When running automated verification (step 3), first detect the project's test runner
+using `detect-test-runner`:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-test-runner
+```
+Run the detected test command **once** for the entire phase (not per-task). If no test
+runner is detected (`runner: null`), skip test execution gracefully. Include the test
+result (pass/fail/skipped + output summary) in per-task verification results.
+
+Then spawn a **forge-verifier** agent for parallel verification of multiple tasks.
+For single-task phases, verify inline.
 
 When presenting UAT results (step 4), use AskUserQuestion for each task or batch
 them if there are many. Include the acceptance criteria and automated check results.

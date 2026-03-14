@@ -32,11 +32,50 @@ If there are still-open tasks, warn the user that not all tasks are complete.
 
 ## 3. Automated Verification
 
+### 3a. Detect and Run Project Test Suite (Once Per Phase)
+
+Before verifying individual tasks, detect and run the project's test suite **once** for the
+entire phase. Do NOT run tests per-task — that would cause redundant N+1 test executions.
+
+**Detect the test runner:**
+```bash
+TEST_RUNNER_JSON=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-test-runner)
+```
+
+Parse the JSON result. The `runner` field indicates whether a test runner was found.
+
+**If `runner` is `null`** (no test runner detected):
+- Log: `"No test runner detected -- skipping test execution"`
+- Set `TEST_RESULT=skipped` and proceed to step 3b.
+
+**If `runner` is non-null**, extract the `command` field (e.g. `npm test`, `cargo test`, `pytest`)
+and execute it once:
+```bash
+TEST_OUTPUT=$(<detected-command> 2>&1)
+TEST_EXIT_CODE=$?
+```
+
+- If the test command exits with **zero**: set `TEST_RESULT=pass`.
+- If the test command exits with **non-zero**: set `TEST_RESULT=fail`.
+
+In both cases, capture the full test output (`TEST_OUTPUT`) and a summary of the results
+(e.g., number of tests passed/failed/skipped). This test result will be included in per-task
+verification results in Step 3b and presented to the user in Step 4.
+
+### 3b. Per-Task Acceptance Criteria Verification
+
 For each task in `tasks_to_verify`, attempt to verify acceptance criteria programmatically:
-- Run existing tests (`npm test`, `cargo test`, `pytest`, etc.)
 - Check that expected files exist
 - Verify expected behavior via CLI commands
 - Look for regressions
+
+**Include test results in per-task verification:**
+- If `TEST_RESULT=pass` or `TEST_RESULT=skipped`: the test suite does not block task verification.
+  Include the test outcome as context in the task's verification result (e.g., "Test suite: PASS"
+  or "Test suite: skipped (no runner detected)").
+- If `TEST_RESULT=fail`: mark each task's verification as **FAIL** with the test output as evidence.
+  The rationale is that a failing test suite means the phase's changes may have introduced regressions,
+  and no individual task can be considered verified until tests pass.
 
 Resolve the model for the verifier agent:
 ```bash
