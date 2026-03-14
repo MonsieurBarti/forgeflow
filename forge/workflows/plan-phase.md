@@ -395,6 +395,32 @@ exists (e.g., re-running plan on a phase), the command is idempotent — it will
 existing branch and check it out without error. If no milestone parent exists, a branch
 named `forge/phase-<phase-id>` is created instead.
 
+## 8. Cost Estimate
+
+After planning completes, fetch the estimated cost for the phase:
+
+```bash
+COST_EST=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>)
+```
+
+Parse the JSON result. If `estimated_cost_usd` is not null, display:
+
+```
+Estimated phase cost: $<estimated_cost_usd> (<confidence> confidence, based on <historical_phases_used> phase(s))
+```
+
+If `estimated_cost_usd` is null (no historical data), display:
+
+```
+Cost estimate: not available (no completed phases with cost data yet)
+```
+
+If `task_count` is 0, display:
+
+```
+Cost estimate: $0.00 (no tasks in phase)
+```
+
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
 
 </process>
