@@ -24,13 +24,32 @@ async function main() {
 
     const data = JSON.parse(input);
 
-    // Write bridge for context-monitor
+    // Write bridge file with context, cost, and token data
+    const bridge = { timestamp: Date.now() };
+
     if (data.context_remaining !== undefined) {
-      fs.writeFileSync(BRIDGE_FILE, JSON.stringify({
-        context_remaining: data.context_remaining,
-        timestamp: Date.now(),
-      }));
+      bridge.context_remaining = data.context_remaining;
     }
+
+    // Cost data
+    if (data.cost && data.cost.total_cost_usd !== undefined) {
+      bridge.total_cost_usd = data.cost.total_cost_usd;
+    }
+
+    // Token data
+    if (data.context_window) {
+      if (data.context_window.total_input_tokens !== undefined) {
+        bridge.input_tokens = data.context_window.total_input_tokens;
+      }
+      if (data.context_window.total_output_tokens !== undefined) {
+        bridge.output_tokens = data.context_window.total_output_tokens;
+      }
+      if (data.context_window.current_usage !== undefined) {
+        bridge.current_usage = data.context_window.current_usage;
+      }
+    }
+
+    fs.writeFileSync(BRIDGE_FILE, JSON.stringify(bridge));
 
     // Try to get current project status with progress
     let status = '';
