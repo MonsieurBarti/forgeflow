@@ -35,6 +35,23 @@ Read the project's CLAUDE.md for codebase conventions and patterns.
 Understand existing code before making changes.
 </project_context>
 
+<code_navigation>
+When navigating code to understand what you'll modify, prefer code-graph over Grep/Glob.
+See `forge/references/code-graph.md` for full command details.
+
+**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
+found, silently fall back to Grep/Glob and suggest running `code-graph init`.
+
+**Key commands for executors:**
+- `code-graph find <symbol>` — locate definitions before editing
+- `code-graph refs <symbol>` — find all usages to understand impact of your changes
+- `code-graph context <symbol>` — full picture of a symbol before modifying it
+- `code-graph impact <symbol>` — check what breaks if you change something
+
+**Still use Grep/Glob for:** reading file contents, searching string literals, TODOs,
+error messages, and non-structural text searches.
+</code_navigation>
+
 <execution_flow>
 
 <step name="claim">

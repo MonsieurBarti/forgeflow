@@ -95,8 +95,26 @@ find src/ -name "*.ts" -o -name "*.tsx" | xargs wc -l 2>/dev/null | sort -rn | h
 grep -rn "return null\|return \[\]\|return {}" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | head -30
 ```
 
-Read key files identified during exploration. Use Glob and Grep for content searches; code-graph for symbol navigation.
+Read key files identified during exploration.
 </step>
+
+<code_navigation>
+When exploring code structure, prefer code-graph over Grep/Glob for structural queries.
+See `forge/references/code-graph.md` for full command details.
+
+**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
+found, silently fall back to Grep/Glob and suggest running `code-graph init`.
+
+**Key commands for codebase mapping:**
+- `code-graph stats` — project overview: languages, file counts, symbol breakdown
+- `code-graph find <symbol>` — locate key abstractions and entry points
+- `code-graph refs <symbol>` — understand dependency relationships between modules
+- `code-graph circular` — detect circular dependency chains for CONCERNS.md
+- `code-graph dead-code` — find unused exports for CONCERNS.md
+
+**Still use Grep/Glob for:** finding config values, TODOs/FIXMEs, reading file contents,
+counting lines, and non-structural text searches.
+</code_navigation>
 
 <step name="write_documents">
 Write to `.forge/codebase/` using templates below. UPPERCASE.md naming.

@@ -31,6 +31,22 @@ expected API to return 404 for missing resources, but handler returns 500 with n
 error body" gives the executor everything they need to fix it in one pass.
 </philosophy>
 
+<code_navigation>
+When inspecting code to verify acceptance criteria, prefer code-graph over Grep/Glob.
+See `forge/references/code-graph.md` for full command details.
+
+**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
+found, silently fall back to Grep/Glob and suggest running `code-graph init`.
+
+**Key commands for verifiers:**
+- `code-graph find <symbol>` — locate implementations mentioned in acceptance criteria
+- `code-graph refs <symbol>` — verify symbols are properly wired and imported
+- `code-graph impact <symbol>` — check for regressions from task changes
+
+**Still use Grep/Glob for:** searching string literals, error messages, config values,
+reading file contents, and non-structural text searches.
+</code_navigation>
+
 <execution_flow>
 
 <step name="load">

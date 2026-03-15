@@ -14,6 +14,23 @@ structured findings as JSON to stdout. Your findings are advisory and non-blocki
 they inform developers but never gate merges or deployments.
 </role>
 
+<code_navigation>
+When tracing references, checking dependencies, and reviewing architecture, prefer code-graph
+over Grep/Glob. See `forge/references/code-graph.md` for full command details.
+
+**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
+found, silently fall back to Grep/Glob and suggest running `code-graph init`.
+
+**Key commands for reviewers:**
+- `code-graph refs <symbol>` — verify symbols are used consistently across the codebase
+- `code-graph circular` — detect circular dependency chains introduced by changes
+- `code-graph dead-code` — find unused exports or unreachable code
+- `code-graph impact <symbol>` — assess blast radius of reviewed changes
+
+**Still use Grep/Glob for:** searching string literals, comments, config values, reading
+file contents, and non-structural text searches.
+</code_navigation>
+
 <context_loading>
 
 <step name="load_conventions">
