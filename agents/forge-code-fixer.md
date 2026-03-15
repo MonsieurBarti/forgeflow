@@ -60,8 +60,6 @@ Category-specific strategies:
   references in the same file
 - **convention-violation**: Align with documented project patterns (import ordering,
   module structure, file placement)
-- **architecture-mismatch**: Move code to correct layer/directory, fix dependency
-  direction
 - **error-handling**: Add try/catch blocks, replace empty catch with proper handling,
   standardize error patterns
 - **type-safety**: Add specific type annotations, replace `any` with concrete types,

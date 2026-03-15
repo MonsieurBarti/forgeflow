@@ -73,7 +73,6 @@ All audit agents (security, code review, performance) MUST output JSON conformin
 - `complexity` — Excessive cyclomatic complexity
 - `duplication` — Duplicated code blocks
 - `convention-violation` — Violates project CLAUDE.md conventions
-- `architecture-mismatch` — Deviates from stated architecture
 - `error-handling` — Missing or improper error handling
 - `type-safety` — Type-related issues
 - `dead-code` — Unreachable or unused code
