@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { bd, bdArgs, output, forgeError } = require('./core.cjs');
 
 const FP_KEY_PREFIX = 'forge:quality-gate:fp:';
@@ -231,16 +231,16 @@ module.exports = {
     const reportPath = path.join(os.tmpdir(), `forge-quality-gate-${Date.now()}.html`);
     fs.writeFileSync(reportPath, html, 'utf8');
 
-    // Open in browser (path is internally generated, not user input)
+    // Open in browser — execFileSync avoids shell interpretation
     try {
       const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-      execSync(`${openCmd} "${reportPath}"`, { stdio: 'ignore' });
+      execFileSync(openCmd, [reportPath], { stdio: 'ignore' });
     } catch { /* INTENTIONALLY SILENT: browser open is best-effort */ }
 
-    // Schedule deletion after 5 seconds
+    // Schedule deletion after 15 seconds (allows slow browser cold-starts)
     setTimeout(() => {
       try { fs.unlinkSync(reportPath); } catch { /* INTENTIONALLY SILENT */ }
-    }, 5000);
+    }, 15000);
 
     output({ success: true, report_path: reportPath, findings_count: totalFindings });
   },

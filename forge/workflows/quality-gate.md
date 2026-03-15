@@ -173,7 +173,7 @@ and check if it matches any known FP hash. Remove matching findings from the res
 
 ```
 function computeFpHash(agent, category, file, title):
-  input = agent + category + file + title
+  input = agent + '\x00' + category + '\x00' + file + '\x00' + title
   return sha256(input).hex().slice(0, 16)
 ```
 
@@ -239,16 +239,23 @@ REPORT_DATA = {
 }
 ```
 
-Call the report command:
+Write the report data to a temp file first (avoids shell quoting issues with finding data
+that may contain single quotes or special characters), then pass the file path:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-report --data='<REPORT_DATA as JSON>'
+# Write JSON to temp file to avoid shell escaping issues
+REPORT_TMP=$(mktemp /tmp/forge-qg-data-XXXXXX.json)
+cat > "$REPORT_TMP" <<'EOJSON'
+<REPORT_DATA as JSON>
+EOJSON
+node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-report --data="$(cat "$REPORT_TMP")"
+rm -f "$REPORT_TMP"
 ```
 
 **Important:**
 - Report generation failure MUST NOT abort the pipeline. If the command fails, log a warning
   and continue to step 9. Use allowFail or wrap in try/catch.
 - This step runs even for zero-finding cases — the PASSED report is still generated.
-- The report is ephemeral: it auto-opens in the browser and the file is deleted after 5 seconds.
+- The report is ephemeral: it auto-opens in the browser and the file is deleted after 15 seconds.
 
 If findings are empty (zero-finding clean run), report a clean bill of health and stop
 (no approval steps needed):
