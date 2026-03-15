@@ -296,9 +296,115 @@ function readAgentContextEntries(phaseId, agentFilter = null) {
   return entries;
 }
 
+/**
+ * Collect structured plan data for a phase: tasks grouped into execution waves
+ * with design fields, descriptions, acceptance criteria, and architect notes.
+ *
+ * Reusable helper that powers both implementation-preview and interactive plan UI.
+ *
+ * @param {string} phaseId - The phase bead ID.
+ * @returns {{ phase_id: string, phase_title: string|null, total_tasks: number,
+ *   total_files_affected: number, waves: Array, architect_summary: string|null }}
+ *   Each wave.tasks entry includes: id, title, description, acceptance_criteria,
+ *   files_affected, approach, complexity, architect_notes.
+ */
+function collectPlanData(phaseId) {
+  validateId(phaseId);
+
+  const phaseRaw = bdJsonArgs(['show', phaseId]);
+  const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+  const children = bdJsonArgs(['children', phaseId]);
+  const tasks = normalizeChildren(children);
+
+  // --- Collect design data per task ---
+  // Design field is stored as JSON on the task bead; parse it for each task.
+  const taskDesigns = {};
+  for (const task of tasks) {
+    let design = task.design || null;
+    if (typeof design === 'string') {
+      // INTENTIONALLY SILENT: design field may contain malformed JSON;
+      // graceful degradation to defaults is the expected behavior.
+      try { design = JSON.parse(design); } catch { design = null; }
+    }
+    // Normalize file paths: reject absolute paths and path traversal sequences.
+    // NOTE: These paths are display-only (used in implementation-preview output).
+    // They are never used for file I/O, so path.normalize() without path.resolve() is intentional.
+    const rawPaths = (design && Array.isArray(design.files_affected)) ? design.files_affected : [];
+    const safePaths = rawPaths
+      .map(p => path.normalize(String(p)))
+      .filter(p => !path.isAbsolute(p) && !p.startsWith('..'));
+    taskDesigns[task.id] = {
+      files_affected: safePaths,
+      approach: (design && design.approach) ? String(design.approach) : 'No approach specified',
+      complexity: (design && design.complexity) ? String(design.complexity) : null,
+    };
+  }
+
+  // --- Read forge-architect context from phase comments ---
+  let architectSummary = null;
+  const architectNotesByTask = {};
+
+  for (const entry of readAgentContextEntries(phaseId, 'forge-architect')) {
+    if (entry.summary) {
+      architectSummary = String(entry.summary);
+    }
+    for (const f of (entry.findings || [])) {
+      if (!f.task) continue;
+      if (!architectNotesByTask[f.task]) {
+        architectNotesByTask[f.task] = [];
+      }
+      const note = [
+        f.severity ? `[${f.severity}]` : null,
+        f.description || null,
+        f.recommendation ? `Recommendation: ${f.recommendation}` : null,
+      ].filter(Boolean).join(' ');
+      if (note) architectNotesByTask[f.task].push(note);
+    }
+  }
+
+  // --- Detect execution waves via shared helper (Kahn's algorithm, O(V+E)) ---
+  const phaseTaskIds = new Set(tasks.map(t => t.id));
+  const taskById = new Map(tasks.map(t => [t.id, t]));
+
+  const taskDeps = buildIntraPhaseTaskDeps(tasks, phaseTaskIds, taskById);
+
+  // Enrich waves with per-task fields including description and acceptance_criteria
+  const waves = computeWaves(tasks, taskDeps).map(w => ({
+    ...w,
+    tasks: w.tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      description: t.description || null,
+      acceptance_criteria: t.acceptance_criteria || t.acceptance || null,
+      files_affected: taskDesigns[t.id].files_affected,
+      approach: taskDesigns[t.id].approach,
+      complexity: taskDesigns[t.id].complexity,
+      architect_notes: architectNotesByTask[t.id] || [],
+    })),
+  }));
+
+  // --- Compute total files affected (deduplicated across all tasks) ---
+  const allFiles = new Set();
+  for (const task of tasks) {
+    for (const f of taskDesigns[task.id].files_affected) {
+      allFiles.add(f);
+    }
+  }
+
+  return {
+    phase_id: phaseId,
+    phase_title: phase?.title || null,
+    total_tasks: tasks.length,
+    total_files_affected: allFiles.size,
+    waves,
+    architect_summary: architectSummary,
+  };
+}
+
 module.exports = {
-  // Expose helper for programmatic use by verify.md consumers and other callers
+  // Expose helpers for programmatic use by other commands and callers
   detectBuildTest,
+  collectPlanData,
   /**
    * Get phase context: phase details + all tasks + their statuses.
    */
@@ -1332,103 +1438,24 @@ module.exports = {
   /**
    * Generate a structured implementation preview for a phase.
    *
-   * Reads all tasks under a phase, collects their design field data
-   * (files_affected, approach, complexity), reads forge-architect context
-   * from the phase bead comments, detects execution waves, and outputs
-   * a structured preview JSON grouped by wave.
+   * Delegates to collectPlanData() for data collection, then strips the
+   * description and acceptance_criteria fields from each task to preserve
+   * the original output schema.
    */
   'implementation-preview'(args) {
     const phaseId = args[0];
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools implementation-preview <phase-id>');
     }
-    validateId(phaseId);
 
-    const phaseRaw = bdJsonArgs(['show', phaseId]);
-    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
-    const children = bdJsonArgs(['children', phaseId]);
-    const tasks = normalizeChildren(children);
+    const data = collectPlanData(phaseId);
 
-    // --- Collect design data per task ---
-    // Design field is stored as JSON on the task bead; parse it for each task.
-    const taskDesigns = {};
-    for (const task of tasks) {
-      let design = task.design || null;
-      if (typeof design === 'string') {
-        // INTENTIONALLY SILENT: design field may contain malformed JSON;
-        // graceful degradation to defaults is the expected behavior.
-        try { design = JSON.parse(design); } catch { design = null; }
-      }
-      // Normalize file paths: reject absolute paths and path traversal sequences.
-      // NOTE: These paths are display-only (used in implementation-preview output).
-      // They are never used for file I/O, so path.normalize() without path.resolve() is intentional.
-      const rawPaths = (design && Array.isArray(design.files_affected)) ? design.files_affected : [];
-      const safePaths = rawPaths
-        .map(p => path.normalize(String(p)))
-        .filter(p => !path.isAbsolute(p) && !p.startsWith('..'));
-      taskDesigns[task.id] = {
-        files_affected: safePaths,
-        approach: (design && design.approach) ? String(design.approach) : 'No approach specified',
-        complexity: (design && design.complexity) ? String(design.complexity) : null,
-      };
-    }
-
-    // --- Read forge-architect context from phase comments ---
-    let architectSummary = null;
-    const architectNotesByTask = {};
-
-    for (const entry of readAgentContextEntries(phaseId, 'forge-architect')) {
-      if (entry.summary) {
-        architectSummary = String(entry.summary);
-      }
-      for (const f of (entry.findings || [])) {
-        if (!f.task) continue;
-        if (!architectNotesByTask[f.task]) {
-          architectNotesByTask[f.task] = [];
-        }
-        const note = [
-          f.severity ? `[${f.severity}]` : null,
-          f.description || null,
-          f.recommendation ? `Recommendation: ${f.recommendation}` : null,
-        ].filter(Boolean).join(' ');
-        if (note) architectNotesByTask[f.task].push(note);
-      }
-    }
-
-    // --- Detect execution waves via shared helper (Kahn's algorithm, O(V+E)) ---
-    const phaseTaskIds = new Set(tasks.map(t => t.id));
-    const taskById = new Map(tasks.map(t => [t.id, t]));
-
-    const taskDeps = buildIntraPhaseTaskDeps(tasks, phaseTaskIds, taskById);
-
-    // Enrich waves with implementation-preview specific fields after wave computation
-    const waves = computeWaves(tasks, taskDeps).map(w => ({
+    // Strip description and acceptance_criteria to preserve original output schema
+    const waves = data.waves.map(w => ({
       ...w,
-      tasks: w.tasks.map(t => ({
-        id: t.id,
-        title: t.title,
-        files_affected: taskDesigns[t.id].files_affected,
-        approach: taskDesigns[t.id].approach,
-        complexity: taskDesigns[t.id].complexity,
-        architect_notes: architectNotesByTask[t.id] || [],
-      })),
+      tasks: w.tasks.map(({ description, acceptance_criteria, ...rest }) => rest),
     }));
 
-    // --- Compute total files affected (deduplicated across all tasks) ---
-    const allFiles = new Set();
-    for (const task of tasks) {
-      for (const f of taskDesigns[task.id].files_affected) {
-        allFiles.add(f);
-      }
-    }
-
-    output({
-      phase_id: phaseId,
-      phase_title: phase?.title || null,
-      total_tasks: tasks.length,
-      total_files_affected: allFiles.size,
-      waves,
-      architect_summary: architectSummary,
-    });
+    output({ ...data, waves });
   },
 };
