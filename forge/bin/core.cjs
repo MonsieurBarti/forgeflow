@@ -241,6 +241,11 @@ function git(args, opts = {}) {
   }
 }
 
+/**
+ * @deprecated Use bdJsonArgs() instead. bdJson() constructs the command via
+ * string interpolation which is vulnerable to command injection. bdJsonArgs()
+ * accepts an array of arguments and avoids shell interpretation entirely.
+ */
 function bdJson(args) {
   const raw = bd(`${args} --json`);
   if (!raw) return null;

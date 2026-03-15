@@ -977,7 +977,7 @@ function generateDashboardHTML(data) {
     background: none;
     border: none;
     color: var(--text-muted);
-    font-family: 'IBM Plex Sans', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 0.85rem;
     font-weight: 500;
     padding: 0.75rem 1.25rem;
@@ -1508,7 +1508,7 @@ function mutateSettingsFile(scope, filePath, mutatorFn) {
       existing = parseSimpleYaml(fs.readFileSync(filePath, 'utf8'));
     } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
     mutatorFn(existing);
-    const dir = require('path').dirname(filePath);
+    const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(filePath, toSimpleYaml(existing));
   }

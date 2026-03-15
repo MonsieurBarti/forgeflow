@@ -104,6 +104,9 @@ async function serveAndAwaitDecision({ html, timeout = 1800000, title } = {}) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
       });
       res.end(html);
       return;
@@ -136,12 +139,14 @@ async function serveAndAwaitDecision({ html, timeout = 1800000, title } = {}) {
   });
 
   // Bind to loopback only, OS-assigned port.
-  await new Promise((res, rej) => {
-    server.listen(0, '127.0.0.1', () => res());
-    server.on('error', rej);
+  await new Promise((listenResolve, listenReject) => {
+    server.listen(0, '127.0.0.1', () => listenResolve());
+    server.on('error', listenReject);
   });
 
   const addr = server.address();
+  // Token in URL is acceptable for localhost-only single-session use: it never
+  // leaves the loopback interface and browser history is not a threat model here.
   const baseUrl = `http://127.0.0.1:${addr.port}/?token=${token}`;
 
   // Timeout -- reject with a distinguishable TimeoutError.
