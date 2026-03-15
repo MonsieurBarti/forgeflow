@@ -271,6 +271,8 @@ const SEVERITY_COLORS = {
   info:     { bg: '#1a1a2e', border: '#6b7280', text: '#9ca3af', badge: '#4b5563' },
 };
 
+// TODO: generateReportHTML (~240 lines) interleaves data transformation, CSS construction,
+// and HTML assembly. Separate into distinct helpers in a future phase to improve readability.
 function generateReportHTML({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed, timestamp }) {
   const blockerFindings = [];
   const advisoryFindings = [];

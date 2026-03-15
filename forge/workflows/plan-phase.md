@@ -310,6 +310,8 @@ node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
   \"agent\": \"forge-architect\",
   \"status\": \"completed\",
   \"findings\": [
+    // Note: forge-architect uses its own severity taxonomy (suggestion/concern), which is
+    // separate from the audit findings schema (critical/high/medium/low/info).
     { \"task\": \"<task-id>\", \"severity\": \"suggestion\"|\"concern\", \"description\": \"...\", \"recommendation\": \"...\" }
   ],
   \"summary\": \"<one-line overall architectural assessment>\"
