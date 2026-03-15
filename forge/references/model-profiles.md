@@ -15,6 +15,7 @@ Model profiles control which Claude model each Forge agent uses. This allows bal
 | forge-debugger | opus | sonnet | sonnet |
 | forge-qa | sonnet | sonnet | haiku |
 | forge-codebase-mapper | sonnet | haiku | haiku |
+| forge-architect | sonnet | sonnet | haiku |
 
 ## Profile Philosophy
 

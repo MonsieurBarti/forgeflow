@@ -1,7 +1,7 @@
 # Audit Findings Schema
 
-Canonical JSON schema for audit agent output. All three audit agents (security-auditor,
-code-reviewer, performance-auditor) MUST produce output conforming to this schema.
+Canonical JSON schema for audit agent output. All four audit agents (security-auditor,
+code-reviewer, performance-auditor, architect) MUST produce output conforming to this schema.
 The quality-gate workflow and quality-gate-report command consume this format.
 
 ## Schema

@@ -65,6 +65,7 @@ const MODEL_PROFILES = {
   'forge-security-fixer':     { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'forge-code-fixer':         { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'forge-perf-fixer':         { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-architect':           { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
 };
 
 // Map old role names to new agent names for backwards compatibility
@@ -83,6 +84,7 @@ const ROLE_TO_AGENT = {
   security_fixer: 'forge-security-fixer',
   code_fixer: 'forge-code-fixer',
   perf_fixer: 'forge-perf-fixer',
+  architect: 'forge-architect',
 };
 
 const DEFAULT_MODEL_PROFILE = 'balanced';
