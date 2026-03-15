@@ -30,7 +30,7 @@ const CSS_VARS = `
 // esc -- HTML entity escaping (unified replacement for esc / escHtml)
 // ---------------------------------------------------------------------------
 function esc(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +73,10 @@ ${bodyHTML}
 // ---------------------------------------------------------------------------
 // card -- glassmorphism card component
 // ---------------------------------------------------------------------------
+/**
+ * @param {string} [content] - Treated as trusted HTML. Callers must pre-escape
+ *   any dynamic values before passing them as content to prevent XSS.
+ */
 function card({ title, content, className, style } = {}) {
   const cls = ['ds-card'];
   if (className) cls.push(className);
@@ -223,6 +227,10 @@ const TABLE_CSS = `
 // ---------------------------------------------------------------------------
 // tabs -- tab navigation with panel containers and switching JS
 // ---------------------------------------------------------------------------
+/**
+ * @param {Function} [panelRenderer] - Return values are treated as trusted HTML.
+ *   Callers must pre-escape any dynamic values in panelRenderer output to prevent XSS.
+ */
 function tabs({ items, activeIndex, panelRenderer } = {}) {
   const active = Number(activeIndex) || 0;
   const tabItems = (items || []);
