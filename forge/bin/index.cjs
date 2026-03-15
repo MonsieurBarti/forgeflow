@@ -37,7 +37,17 @@ if (!commands[command]) {
 }
 
 try {
-  commands[command](args);
+  const result = commands[command](args);
+  // Some commands (e.g. generate-dashboard, quality-gate-triage) return a Promise
+  // when they start a dev-server. Handle async dispatch so the process stays alive
+  // until the promise settles and errors are surfaced properly.
+  if (result && typeof result.then === 'function') {
+    result.catch((err) => {
+      const code = err.code || 'COMMAND_FAILED';
+      const suggestion = err.suggestion || `Run: forge-tools ${command} --help or check arguments`;
+      forgeError(code, `Error in ${command}: ${err.message}`, suggestion, { command, error: err.message });
+    });
+  }
 } catch (err) {
   // Propagate specific error codes (e.g. BD_CONNECTION_ERROR) so consumers
   // can distinguish infrastructure failures from logical command errors.
