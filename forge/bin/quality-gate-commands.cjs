@@ -241,6 +241,10 @@ module.exports = {
     // cmd.exe /c start instead; the empty '' arg is the window title.
     try {
       if (process.platform === 'win32') {
+        // Validate reportPath is within os.tmpdir() before passing to cmd.exe.
+        if (!reportPath.startsWith(os.tmpdir())) {
+          throw new Error('reportPath is outside os.tmpdir() -- refusing to open');
+        }
         execFileSync('cmd.exe', ['/c', 'start', '', reportPath], { stdio: 'ignore' });
       } else {
         const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -481,8 +485,8 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
   const bodyHTML = `
 <div class="container">
   <div class="verdict-banner">
-    <div class="verdict-icon">${verdictIcon}</div>
-    <div class="verdict-text">${verdictText}</div>
+    <div class="verdict-icon">${esc(verdictIcon)}</div>
+    <div class="verdict-text">${esc(verdictText)}</div>
     <div class="verdict-sub">${totalFindings} finding${totalFindings !== 1 ? 's' : ''} across ${agents.length} agent${agents.length !== 1 ? 's' : ''}</div>
   </div>
 

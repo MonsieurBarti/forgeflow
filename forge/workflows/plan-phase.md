@@ -337,7 +337,7 @@ MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-plan-
 
 Gather project context for the checker:
 ```bash
-SLIM=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
+SLIM=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim "<project-id>")
 ```
 
 Spawn a **forge-plan-checker** agent:

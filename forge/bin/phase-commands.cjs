@@ -1313,6 +1313,8 @@ module.exports = {
         try { design = JSON.parse(design); } catch { design = null; }
       }
       // Normalize file paths: reject absolute paths and path traversal sequences.
+      // NOTE: These paths are display-only (used in implementation-preview output).
+      // They are never used for file I/O, so path.normalize() without path.resolve() is intentional.
       const rawPaths = (design && Array.isArray(design.files_affected)) ? design.files_affected : [];
       const safePaths = rawPaths
         .map(p => path.normalize(String(p)))
