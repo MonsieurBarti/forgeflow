@@ -72,20 +72,7 @@ Restart when: 2+ hours no progress, 3+ failed fixes, can't explain behavior, deb
 </philosophy>
 
 <code_navigation>
-When tracing bugs through code, prefer code-graph over Grep/Glob for structural queries.
-See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for debugging:**
-- `code-graph context <symbol>` — full picture of a suspect symbol: definition, refs, deps
-- `code-graph impact <symbol>` — what depends on a buggy function (blast radius)
-- `code-graph find <symbol>` — locate where a symbol from an error trace is defined
-- `code-graph refs <symbol>` — find all call sites to understand how a function is invoked
-
-**Still use Grep/Glob for:** searching error messages, log output, config values, reading
-file contents, and non-structural text searches.
+@forge/references/code-graph.md
 </code_navigation>
 
 <hypothesis_testing>

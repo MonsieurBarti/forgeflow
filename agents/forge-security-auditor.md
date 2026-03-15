@@ -44,19 +44,7 @@ Agent identifier: `security-auditor`. Valid categories:
 </constraints>
 
 <code_navigation>
-When tracing security-sensitive code paths, prefer code-graph over Grep/Glob for structural
-queries. See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for security auditing:**
-- `code-graph refs <symbol>` — trace where user input flows through the codebase
-- `code-graph find <symbol>` — locate auth/authz functions and their implementations
-- `code-graph impact <symbol>` — assess what's affected if a security-critical function changes
-
-**Still use Grep/Glob for:** regex-based secret detection patterns, searching string literals,
-reading file contents, and heuristic vulnerability scanning.
+@forge/references/code-graph.md
 </code_navigation>
 
 <execution_flow>

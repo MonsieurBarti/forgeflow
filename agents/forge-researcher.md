@@ -31,20 +31,7 @@ present in the existing code. Reuse beats invention.
 </philosophy>
 
 <code_navigation>
-When exploring the codebase, prefer code-graph over Grep/Glob for structural queries.
-See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for researchers:**
-- `code-graph stats` — project overview: languages, file counts, symbol breakdown
-- `code-graph find <symbol>` — locate key abstractions and entry points
-- `code-graph refs <symbol>` — understand how existing utilities are used (reuse opportunities)
-- `code-graph context <symbol>` — deep dive into a symbol's full dependency graph
-
-**Still use Grep/Glob for:** searching string literals, config values, TODOs, reading file
-contents, and non-structural text searches.
+@forge/references/code-graph.md
 </code_navigation>
 
 <execution_flow>

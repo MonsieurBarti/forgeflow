@@ -38,19 +38,7 @@ Categories for this agent:
 </output_format>
 
 <code_navigation>
-When analyzing code for performance anti-patterns, prefer code-graph over Grep/Glob for
-structural queries. See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for performance auditing:**
-- `code-graph refs <symbol>` — find all call sites of a hot function
-- `code-graph impact <symbol>` — understand the dependency chain of a bottleneck
-- `code-graph circular` — detect circular dependencies that cause redundant work
-
-**Still use Grep/Glob for:** finding loop patterns, string literals, inline allocations,
-reading file contents, and heuristic regex-based scans.
+@forge/references/code-graph.md
 </code_navigation>
 
 <execution_flow>

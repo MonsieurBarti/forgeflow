@@ -99,21 +99,7 @@ Read key files identified during exploration.
 </step>
 
 <code_navigation>
-When exploring code structure, prefer code-graph over Grep/Glob for structural queries.
-See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for codebase mapping:**
-- `code-graph stats` — project overview: languages, file counts, symbol breakdown
-- `code-graph find <symbol>` — locate key abstractions and entry points
-- `code-graph refs <symbol>` — understand dependency relationships between modules
-- `code-graph circular` — detect circular dependency chains for CONCERNS.md
-- `code-graph dead-code` — find unused exports for CONCERNS.md
-
-**Still use Grep/Glob for:** finding config values, TODOs/FIXMEs, reading file contents,
-counting lines, and non-structural text searches.
+@forge/references/code-graph.md
 </code_navigation>
 
 <step name="write_documents">

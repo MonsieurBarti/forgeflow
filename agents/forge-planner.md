@@ -32,20 +32,7 @@ has no obligation to implement it.
 </philosophy>
 
 <code_navigation>
-When analyzing code scope for task breakdown, prefer code-graph over Grep/Glob.
-See `forge/references/code-graph.md` for full command details.
-
-**Detection:** Run `which code-graph`. If found, use it for all structural queries. If not
-found, silently fall back to Grep/Glob and suggest running `code-graph init`.
-
-**Key commands for planners:**
-- `code-graph stats` — project overview to gauge phase scope
-- `code-graph find <symbol>` — locate symbols mentioned in phase description
-- `code-graph refs <symbol>` — understand blast radius of planned changes
-- `code-graph impact <symbol>` — identify dependencies that constrain task ordering
-
-**Still use Grep/Glob for:** searching string literals, config values, TODOs, reading file
-contents, and non-structural text searches.
+@forge/references/code-graph.md
 </code_navigation>
 
 <execution_flow>
