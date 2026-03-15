@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
+  bd, bdArgs, bdJson, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
   collectMilestoneRequirements,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS, SETTINGS_ENUMS,
@@ -874,7 +874,7 @@ function resolveProject() {
  *     phase_count, completed_count }
  */
 function collectProjectIssues(projectId) {
-  const issues = normalizeChildren(bdJson(`children ${projectId}`));
+  const issues = normalizeChildren(bdJsonArgs(['children', projectId]));
 
   const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
   const phases = [];
@@ -896,7 +896,7 @@ function collectProjectIssues(projectId) {
 
   // Collect from milestones (3-level: milestone -> phase -> req) with per-milestone grouping
   for (const ms of milestones) {
-    const msIssues = normalizeChildren(bdJson(`children ${ms.id}`));
+    const msIssues = normalizeChildren(bdJsonArgs(['children', ms.id]));
 
     const msPhases = [];
     const msReqs = [];
@@ -908,7 +908,7 @@ function collectProjectIssues(projectId) {
       if (kind === 'phase') {
         phases.push(i); msPhases.push(i);
         // Traverse phase children to find forge:req beads (3-level hierarchy)
-        const phaseChildren = normalizeChildren(bdJson(`children ${i.id}`));
+        const phaseChildren = normalizeChildren(bdJsonArgs(['children', i.id]));
         for (const pc of phaseChildren) {
           if (seenIds.has(pc.id)) continue;
           seenIds.add(pc.id);
@@ -947,7 +947,7 @@ function collectProjectIssues(projectId) {
     if (kind === 'phase') { phases.push(i); legacyPhases.push(i); }
     else if (kind === 'req') { requirements.push(i); legacyReqs.push(i); }
     else if (kind === 'quick') {
-      const children = normalizeChildren(bdJson(`children ${i.id}`));
+      const children = normalizeChildren(bdJsonArgs(['children', i.id]));
       const prMatch = (i.notes || '').match(/PR:\s*(https?:\/\/\S+)/);
       quickTasks.push({
         id: i.id,
@@ -999,7 +999,7 @@ function buildPhaseDetails(phases, { includeMeta = false } = {}) {
   // TODO(perf): N+1 subprocess -- calls bd children per phase. Needs bd CLI batch-query support.
   const details = [];
   for (const phase of phases) {
-    const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
+    const tasks = normalizeChildren(bdJsonArgs(['children', phase.id]));
     const entry = {
       id: phase.id,
       title: phase.title,
@@ -1029,7 +1029,7 @@ function getRequirementCoverage(requirements) {
   // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Needs bd CLI batch-query support.
   const coverage = [];
   for (const req of requirements) {
-    const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+    const depsRaw = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates', '--json'], { allowFail: true });
     let deps = [];
     if (depsRaw) {
       // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
@@ -1051,11 +1051,11 @@ function getRequirementCoverage(requirements) {
  * Returns { estimated_cost_usd, avg_cost_per_task, task_count, historical_phases_used, confidence }
  */
 function computeCostEstimate(phaseId) {
-  const phase = bdJson(`show ${phaseId}`);
+  const phase = bdJsonArgs(['show', phaseId]);
   if (!phase) return { estimated_cost_usd: null, avg_cost_per_task: null, task_count: 0, historical_phases_used: 0, confidence: 'none' };
 
   // Find parent milestone/project
-  const depUpRaw = bd(`dep list ${phaseId} --direction=up --type=parent-child --json`, { allowFail: true });
+  const depUpRaw = bdArgs(['dep', 'list', phaseId, '--direction=up', '--type=parent-child', '--json'], { allowFail: true });
   let parentId = null;
   if (depUpRaw) {
     try {
@@ -1064,7 +1064,7 @@ function computeCostEstimate(phaseId) {
       for (const dep of depList) {
         const depId = dep.dependency_id || dep.id || dep;
         if (typeof depId === 'string') {
-          const parentBead = bdJson(`show ${depId}`);
+          const parentBead = bdJsonArgs(['show', depId]);
           if (parentBead) {
             const labels = parentBead.labels || [];
             if (labels.includes('forge:milestone') || labels.includes('forge:project')) {
@@ -1080,7 +1080,7 @@ function computeCostEstimate(phaseId) {
   // Get sibling closed phases
   let siblingPhases = [];
   if (parentId) {
-    const siblings = normalizeChildren(bdJson(`children ${parentId}`));
+    const siblings = normalizeChildren(bdJsonArgs(['children', parentId]));
     siblingPhases = siblings.filter(i =>
       (i.labels || []).includes('forge:phase') &&
       i.status === 'closed' &&
@@ -1107,7 +1107,7 @@ function computeCostEstimate(phaseId) {
   }
 
   // Count tasks in target phase
-  const targetChildren = normalizeChildren(bdJson(`children ${phaseId}`));
+  const targetChildren = normalizeChildren(bdJsonArgs(['children', phaseId]));
   const targetTasks = targetChildren.filter(c => (c.labels || []).includes('forge:task'));
   const taskCount = targetTasks.length;
 
@@ -1538,7 +1538,7 @@ function mutateSettingsFile(scope, filePath, mutatorFn) {
  * @returns {object} Dashboard data object matching generateDashboardHTML schema
  */
 function collectDashboardData(projectId) {
-  const project = bdJson(`show ${projectId}`);
+  const project = bdJsonArgs(['show', projectId]);
   const { phases, requirements, milestoneDetails, quickTasks } = collectProjectIssues(projectId);
 
   const phaseDetails = sortPhaseDetails(buildPhaseDetails(phases, { includeMeta: true }));
@@ -2126,7 +2126,7 @@ module.exports = {
     }
     validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    const project = bdJsonArgs(['show', projectId]);
     const { phases, requirements } = collectProjectIssues(projectId);
 
     output({
@@ -2155,7 +2155,7 @@ module.exports = {
     }
     validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    const project = bdJsonArgs(['show', projectId]);
     const { phases, requirements } = collectProjectIssues(projectId);
 
     // Truncate descriptions to save tokens while keeping enough context for display
@@ -2211,7 +2211,7 @@ module.exports = {
     }
     validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    const project = bdJsonArgs(['show', projectId]);
     const { phases } = collectProjectIssues(projectId);
 
     const totalPhases = phases.length;
@@ -2243,7 +2243,7 @@ module.exports = {
     }
     validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    const project = bdJsonArgs(['show', projectId]);
     const { phases, requirements } = collectProjectIssues(projectId);
 
     const phaseDetails = buildPhaseDetails(phases);
@@ -2367,7 +2367,7 @@ module.exports = {
     const inProgressTasks = [];
     for (const phase of phases) {
       if (phase.status === 'closed') continue;
-      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
+      const tasks = normalizeChildren(bdJsonArgs(['children', phase.id]));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title, phase: phase.id });
@@ -2423,7 +2423,7 @@ module.exports = {
 
     const inProgressTasks = [];
     if (currentPhase) {
-      const tasks = normalizeChildren(bdJson(`children ${currentPhase.id}`));
+      const tasks = normalizeChildren(bdJsonArgs(['children', currentPhase.id]));
       for (const task of tasks) {
         if (task.status === 'in_progress') {
           inProgressTasks.push({ id: task.id, title: task.title });
@@ -2454,7 +2454,7 @@ module.exports = {
 
     let project;
     try {
-      project = bdJson(`show ${projectId}`);
+      project = bdJsonArgs(['show', projectId]);
     } catch { /* INTENTIONALLY SILENT — bd show exits non-zero for missing IDs; handled below */ }
     if (!project) {
       forgeError('NOT_FOUND', `Project not found: ${projectId}`, 'Verify the project ID with: forge-tools find-project, or run /forge:new to create a new project', { project_id: projectId });
@@ -2488,7 +2488,7 @@ module.exports = {
     // Cache phase children once for reuse in task-labels and closeable-phase loops.
     const phaseChildrenMap = new Map();
     for (const phase of phases) {
-      const tasks = normalizeChildren(bdJson(`children ${phase.id}`));
+      const tasks = normalizeChildren(bdJsonArgs(['children', phase.id]));
       phaseChildrenMap.set(phase.id, tasks);
     }
 
@@ -2516,7 +2516,7 @@ module.exports = {
 
     const uncoveredReqs = [];
     for (const req of requirements) {
-      const deps = bd(`dep list ${req.id} --direction=up --type validates`, { allowFail: true });
+      const deps = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates'], { allowFail: true });
       if (!deps || deps.trim() === '' || deps.includes('No dependencies')) {
         uncoveredReqs.push(req);
       }
@@ -2734,7 +2734,7 @@ module.exports = {
     for (const bead of forgeBeads) {
       // Skip beads already known to have a parent from phaseChildrenMap
       if (beadsWithKnownParent.has(bead.id)) continue;
-      const depOutput = bd(`dep list ${bead.id} --direction=up --type=parent-child`, { allowFail: true });
+      const depOutput = bdArgs(['dep', 'list', bead.id, '--direction=up', '--type=parent-child'], { allowFail: true });
       const hasParent = depOutput && depOutput.trim() !== '' && !depOutput.includes('No dependencies');
       if (!hasParent) {
         // Suggest the project itself as parent for phases, or the phase for tasks
@@ -3078,8 +3078,8 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to parse debug bead ID from bd output', 'Check bd connectivity and try again', { rawOutput: result });
     }
 
-    bd(`label add ${debugId} forge:debug`, { allowFail: true });
-    bd(`update ${debugId} --status=in_progress`, { allowFail: true });
+    bdArgs(['label', 'add', debugId, 'forge:debug'], { allowFail: true });
+    bdArgs(['update', debugId, '--status=in_progress'], { allowFail: true });
 
     output({ debug_id: debugId, slug });
   },
@@ -3174,8 +3174,8 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to parse todo bead ID from bd output', 'Check bd connectivity and try again', { rawOutput: result });
     }
 
-    bd(`label add ${todoId} forge:todo`, { allowFail: true });
-    bd(`dep add ${todoId} ${projectId} --type=parent-child`, { allowFail: true });
+    bdArgs(['label', 'add', todoId, 'forge:todo'], { allowFail: true });
+    bdArgs(['dep', 'add', todoId, projectId, '--type=parent-child'], { allowFail: true });
 
     output({ todo_id: todoId });
   },
@@ -3190,12 +3190,12 @@ module.exports = {
     }
     validateId(projectId);
 
-    const issues = normalizeChildren(bdJson(`children ${projectId}`));
+    const issues = normalizeChildren(bdJsonArgs(['children', projectId]));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
     // TODO(perf): N+1 subprocess -- calls bd children per milestone. Batch when bd CLI supports bulk queries.
     const result = milestones.map(m => {
-      const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
+      const mIssues = normalizeChildren(bdJsonArgs(['children', m.id]));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
       const reqs = collectMilestoneRequirements(m.id);
 
@@ -3235,18 +3235,18 @@ module.exports = {
     }
     validateId(milestoneId);
 
-    const milestone = bdJson(`show ${milestoneId}`);
+    const milestone = bdJsonArgs(['show', milestoneId]);
     if (!milestone) {
       forgeError('NOT_FOUND', `Milestone not found: ${milestoneId}`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
 
-    const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
+    const issues = normalizeChildren(bdJsonArgs(['children', milestoneId]));
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
     const requirements = collectMilestoneRequirements(milestoneId);
 
     // TODO(perf): N+1 subprocess -- calls bd children per phase. Batch when bd CLI supports bulk queries.
     const phaseHealth = phases.map(phase => {
-      const pIssues = normalizeChildren(bdJson(`children ${phase.id}`));
+      const pIssues = normalizeChildren(bdJsonArgs(['children', phase.id]));
       const tasks = pIssues.filter(i => (i.labels || []).includes('forge:task'));
       const closedTasks = tasks.filter(t => t.status === 'closed');
       return {
@@ -3261,7 +3261,7 @@ module.exports = {
 
     // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Batch when bd CLI supports bulk queries.
     const reqCoverage = requirements.map(req => {
-      const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+      const depsRaw = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates', '--json'], { allowFail: true });
       let validators = [];
       if (depsRaw) {
         try {
@@ -3326,8 +3326,8 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create milestone bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bd(`label add ${created.id} forge:milestone`);
-    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
+    bdArgs(['label', 'add', created.id, 'forge:milestone']);
+    bdArgs(['dep', 'add', created.id, projectId, '--type=parent-child']);
 
     output({
       ok: true,
@@ -3360,7 +3360,7 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create monorepo bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bd(`label add ${created.id} forge:monorepo`);
+    bdArgs(['label', 'add', created.id, 'forge:monorepo']);
 
     // 3. Create child forge:project beads for each detected package
     // Children use flat workspace_path; the parent's workspace_paths map uses child bead IDs as keys.
@@ -3372,8 +3372,8 @@ module.exports = {
       try { child = JSON.parse(childRaw); if (Array.isArray(child)) child = child[0]; } catch { child = null; }
       if (!child || !child.id) continue;
 
-      bd(`label add ${child.id} forge:project`);
-      bd(`dep add ${child.id} ${created.id} --type=parent-child`);
+      bdArgs(['label', 'add', child.id, 'forge:project']);
+      bdArgs(['dep', 'add', child.id, created.id, '--type=parent-child']);
       // Child stores a flat workspace_path for direct lookup via extractWorkspacePath
       bdArgs(['update', child.id, `--design=workspace_path: ${pkg.path}`]);
       children.push({ id: child.id, name: pkg.name, path: pkg.path });
@@ -3461,7 +3461,7 @@ module.exports = {
 
     // Fetch project bead if title not yet resolved
     if (!projectTitle) {
-      const proj = bdJson(`show ${projectId}`);
+      const proj = bdJsonArgs(['show', projectId]);
       projectTitle = proj?.title || proj?.subject || projectId;
     }
 
@@ -3481,7 +3481,7 @@ module.exports = {
     // 3. Get task summary for the current phase
     let tasks = { total: 0, ready: 0, in_progress: 0, blocked: 0, done: 0 };
     if (currentPhase) {
-      const children = normalizeChildren(bdJson(`children ${currentPhase.id}`));
+      const children = normalizeChildren(bdJsonArgs(['children', currentPhase.id]));
       const open = children.filter(t => t.status === 'open').length;
       const inProgress = children.filter(t => t.status === 'in_progress').length;
       const closed = children.filter(t => t.status === 'closed').length;
@@ -3678,7 +3678,7 @@ module.exports = {
     }
 
     // 5. Store task_count so computeCostEstimate can avoid an N+1 lookup
-    const phaseChildren = normalizeChildren(bdJson(`children ${phaseId}`));
+    const phaseChildren = normalizeChildren(bdJsonArgs(['children', phaseId]));
     record.task_count = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
 
     // 6. Persist to bd kv
@@ -3722,7 +3722,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJson(`show ${phaseId}`);
+    const phase = bdJsonArgs(['show', phaseId]);
     if (!phase) {
       forgeError('NOT_FOUND', `Phase not found: ${phaseId}`, 'Verify the phase ID with: forge-tools list-phases <project-id>', { phaseId });
     }

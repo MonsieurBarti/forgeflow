@@ -276,7 +276,7 @@ function bdJson(args) {
     // Raw output redacted to prevent sensitive data leaking to stderr.
     if (process.env.FORGE_DEBUG) {
       const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-      console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
+      console.error('[bdJson] Parse failure for:', args.split(/\s+/)[0], 'raw:', truncated);
     } else {
       const cmdName = args.split(/\s+/)[0] || 'unknown';
       console.error(`[bdJson] JSON parse failure for command "${cmdName}" (${raw.length} bytes)`);
