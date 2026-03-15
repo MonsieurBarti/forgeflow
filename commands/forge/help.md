@@ -2,7 +2,7 @@
 name: forge:help
 description: Show available Forge commands and usage guide
 argument-hint: ""
-allowed-tools: Read
+allowed-tools: Read, Bash
 ---
 
 <objective>

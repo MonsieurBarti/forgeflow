@@ -377,6 +377,17 @@ PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 
 Show: tasks, their acceptance criteria, requirement links, and execution order (waves).
 
+## 6.5. Display Cost Estimate
+
+After plan verification, show the estimated cost for executing this phase:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>
+```
+
+Display the result to the user so they know the expected token/cost budget before execution.
+This is best-effort — if the command fails (e.g., no historical data), skip silently.
+
 ## 7. Mark Phase as Planned
 
 ```bash

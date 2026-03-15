@@ -33,6 +33,16 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
 ```
 If the bridge file is missing, this outputs a warning but does not block execution.
 
+## 1.5. Snapshot Starting Cost
+
+Record cost baseline at phase start for token/cost tracking:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id> start
+```
+
+This is best-effort — if it fails, continue execution.
+
 ## 2. Switch to Phase Branch
 
 Ensure commits land on the correct phase branch, not main. Use `branch-create` which is
