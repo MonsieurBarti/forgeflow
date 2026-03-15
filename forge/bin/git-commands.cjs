@@ -10,17 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bdJson, git, gh, output, forgeError, normalizeChildren } = require('./core.cjs');
-
-/**
- * Validate a bead/milestone ID to prevent path traversal.
- * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
- */
-function validateId(id) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
-    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
-  }
-}
+const { bdJson, git, gh, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
 
 /**
  * Resolve a worktree path and verify it stays within the expected base directory.
@@ -49,7 +39,8 @@ module.exports = {
     const branch = `forge/m-${milestoneId}`;
 
     if (fs.existsSync(wtPath)) {
-      output({ created: false, path: wtPath, branch, reason: 'already_exists' });
+      const hint = 'Worktree already exists at ' + wtPath + '. Use it directly or remove with: forge-tools worktree-remove ' + milestoneId;
+      output({ created: false, path: wtPath, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -88,7 +79,7 @@ module.exports = {
     const wtPath = safeWorktreePath(milestoneId);
 
     if (!fs.existsSync(wtPath)) {
-      output({ removed: false, reason: 'not_found' });
+      output({ removed: false, reason: 'not_found', suggestion: 'Worktree not found. List existing worktrees with: git worktree list' });
       return;
     }
 
@@ -99,7 +90,7 @@ module.exports = {
       if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
         fs.rmdirSync(parent);
       }
-    } catch { /* ignore */ }
+    } catch { /* INTENTIONALLY SILENT: empty parent dir cleanup is best-effort */ }
 
     output({ removed: true, path: wtPath });
   },
@@ -134,7 +125,8 @@ module.exports = {
     const existing = git(['branch', '--list', branch], { allowFail: true });
     if (existing) {
       git(['checkout', branch]);
-      output({ created: false, branch, reason: 'already_exists' });
+      const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -151,7 +143,7 @@ module.exports = {
     if (!branch) {
       forgeError('MISSING_ARG', 'Missing required argument: branch', 'Run: forge-tools branch-push <branch-name>');
     }
-    git(['push', '-u', 'origin', branch]);
+    git(['push', '-u', 'origin', '--', branch]);
     output({ pushed: true, branch });
   },
 
@@ -172,8 +164,7 @@ module.exports = {
     const children = bdJson(`children ${phaseId}`);
     const tasks = normalizeChildren(children);
 
-    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
-    // Requires bd CLI bulk query support to optimize further.
+    // TODO(perf): N+1 subprocess -- calls bd dep list per task. Batch when bd CLI supports bulk queries.
     const reqCoverage = [];
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
@@ -227,7 +218,8 @@ module.exports = {
     // Idempotency: if a PR already exists for this branch, return it
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
-      return output({ created: false, url: existing, branch, base, title });
+      const hint = 'A PR already exists for this branch. View it at: ' + existing;
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
     }
 
     try {
@@ -258,7 +250,8 @@ module.exports = {
     const existing = git(['branch', '--list', branch], { allowFail: true });
     if (existing) {
       git(['checkout', branch]);
-      output({ created: false, branch, reason: 'already_exists' });
+      const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
       return;
     }
 
@@ -299,7 +292,8 @@ module.exports = {
     // Idempotency: if a PR already exists for this branch, return it
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
-      return output({ created: false, url: existing, branch, base, title });
+      const hint = 'A PR already exists for this branch. View it at: ' + existing;
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
     }
 
     try {

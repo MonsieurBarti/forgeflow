@@ -9,15 +9,14 @@
  *           config-get, config-set, config-list, config-clear, health,
  *           debug-list, debug-create, debug-update, todo-list, todo-create,
  *           milestone-list, milestone-audit, milestone-create, monorepo-create, remember, init-quick,
- *           cost-snapshot, cost-estimate, status
+ *           cost-snapshot, cost-estimate, status, help-context
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { homedir } = os;
 const {
-  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
+  bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -25,16 +24,6 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
-
-/**
- * Validate a bead/project ID to prevent injection.
- * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
- */
-function validateId(id) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
-    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
-  }
-}
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -46,6 +35,8 @@ function parseBdCreateId(result) {
     const data = JSON.parse(result);
     return data.id || data.issue_id || null;
   } catch {
+    // INTENTIONALLY SILENT: bd create output format varies between versions;
+    // fallback to regex extraction handles non-JSON output gracefully.
     const match = result.match(/([a-z]+-[a-z0-9]+)/);
     return match ? match[1] : null;
   }
@@ -94,7 +85,7 @@ function loadMergedSettings() {
       }
     }
   } catch {
-    // No global settings file
+    // INTENTIONALLY SILENT: global settings file is optional; defaults suffice
   }
 
   try {
@@ -108,7 +99,7 @@ function loadMergedSettings() {
       }
     }
   } catch {
-    // No project settings file
+    // INTENTIONALLY SILENT: project settings file is optional; defaults suffice
   }
 
   return { merged, sources };
@@ -169,11 +160,11 @@ function expandGlobs(patterns, root) {
               try {
                 const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
                 if (pkg.name) name = pkg.name;
-              } catch { /* use dir name */ }
+              } catch { /* INTENTIONALLY SILENT: package.json is optional; dir name suffices */ }
               results.push({ name, path: pkgPath });
             }
           }
-        } catch { /* skip unreadable */ }
+        } catch { /* INTENTIONALLY SILENT: unreadable directory entries are skipped during workspace detection */ }
       } else {
         // Direct path (no glob)
         const pkgJsonPath = path.join(root, clean, 'package.json');
@@ -181,7 +172,7 @@ function expandGlobs(patterns, root) {
         try {
           const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
           if (pkg.name) name = pkg.name;
-        } catch { /* use dir name */ }
+        } catch { /* INTENTIONALLY SILENT: package.json is optional; dir name suffices */ }
         results.push({ name, path: clean });
       }
     }
@@ -198,7 +189,7 @@ function detectWorkspaces(rootDir) {
   let rootPkg = null;
   try {
     rootPkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  } catch { /* no root package.json */ }
+  } catch { /* INTENTIONALLY SILENT: root package.json is optional for workspace detection */ }
 
   // Try pnpm-workspace.yaml
   const pnpmPath = path.join(rootDir, 'pnpm-workspace.yaml');
@@ -221,7 +212,7 @@ function detectWorkspaces(rootDir) {
       if (patterns.length > 0) {
         return { source: 'pnpm-workspace.yaml', packages: expandGlobs(patterns, rootDir) };
       }
-    } catch { /* fall through */ }
+    } catch { /* INTENTIONALLY SILENT: pnpm-workspace.yaml parse failure falls through to other detection methods */ }
   }
 
   // Try turbo.json (Turborepo reads workspaces from package.json)
@@ -318,6 +309,8 @@ function resolveProject() {
     // Fallback to first project
     return { id: issues[0].id, title: issues[0].title || issues[0].subject };
   } catch {
+    // INTENTIONALLY SILENT: bd list parse failure means no project can be resolved;
+    // returning null lets callers handle the missing-project case explicitly.
     return null;
   }
 }
@@ -465,7 +458,8 @@ function getRequirementCoverage(requirements) {
     const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
     let deps = [];
     if (depsRaw) {
-      try { deps = JSON.parse(depsRaw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+      try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
     }
     coverage.push({
       id: req.id,
@@ -506,7 +500,7 @@ function computeCostEstimate(phaseId) {
           }
         }
       }
-    } catch { /* parse error */ }
+    } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
   }
 
   // Get sibling closed phases
@@ -528,16 +522,14 @@ function computeCostEstimate(phaseId) {
     try {
       const costData = JSON.parse(costRaw.trim());
       if (costData && typeof costData.total_usd === 'number' && costData.total_usd > 0) {
-        let taskCount = costData.task_count;
-        if (typeof taskCount !== 'number') {
-          const phaseChildren = normalizeChildren(bdJson(`children ${sibling.id}`));
-          taskCount = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
-        }
+        // Use stored task_count; default to 0 for historical records missing it
+        // (avoids an N+1 bdJson call per sibling phase).
+        const taskCount = typeof costData.task_count === 'number' ? costData.task_count : 0;
         if (taskCount > 0) {
           historicalCosts.push({ phase_id: sibling.id, total_usd: costData.total_usd, task_count: taskCount });
         }
       }
-    } catch { /* invalid JSON */ }
+    } catch { /* INTENTIONALLY SILENT: invalid or missing JSON data is handled by null fallback */ }
   }
 
   // Count tasks in target phase
@@ -612,9 +604,9 @@ function collectAgentRoster() {
             vibe: fm.vibe || fm.emoji || '',
           });
         }
-      } catch { /* skip unreadable agent files */ }
+      } catch { /* INTENTIONALLY SILENT: unreadable agent files are skipped during roster collection */ }
     }
-  } catch { /* skip unreadable agents dir */ }
+  } catch { /* INTENTIONALLY SILENT: unreadable agents directory is non-fatal */ }
 
   return agents;
 }
@@ -1103,7 +1095,6 @@ function generateDashboardHTML(data) {
     margin-top: 0.1rem;
   }
 
-  .ms-body { }
   .section-title {
     font-size: 0.85rem;
     font-weight: 600;
@@ -1495,7 +1486,7 @@ module.exports = {
                   output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
                   return;
                 }
-              } catch { /* fall through */ }
+              } catch { /* INTENTIONALLY SILENT: monorepo lookup failure falls through to first-project fallback */ }
             }
             // Still no match — return first project as last resort (only inside a git repo)
             const firstProject = issues[0];
@@ -1508,7 +1499,7 @@ module.exports = {
           return;
         }
       } catch {
-        // fall through to cwd check
+        // INTENTIONALLY SILENT: bd list JSON parse failure falls through to cwd settings check
       }
     }
 
@@ -1523,11 +1514,14 @@ module.exports = {
           return;
         }
       } catch {
-        // fall through
+        // INTENTIONALLY SILENT: settings YAML parse failure falls through to found:false
       }
     }
 
-    output({ found: false });
+    output({
+      found: false,
+      suggestion: 'Run /forge:new to initialize a project, or check that bd is running with: bd list'
+    });
   },
 
   /**
@@ -1550,6 +1544,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools project-context <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1575,6 +1570,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases } = collectProjectIssues(projectId);
@@ -1606,6 +1602,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools full-progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1647,6 +1644,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools generate-dashboard <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
@@ -1722,6 +1720,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools save-session <project-bead-id>');
     }
+    validateId(projectId);
 
     const { phases } = collectProjectIssues(projectId);
 
@@ -1771,11 +1770,15 @@ module.exports = {
         const data = JSON.parse(projectResult);
         const issues = Array.isArray(data) ? data : (data.issues || []);
         if (issues.length > 0) project = issues[0];
-      } catch { /* ignore */ }
+      } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to no-project path */ }
     }
 
     if (!project) {
-      output({ found: false, memories: memories || null });
+      output({
+        found: false,
+        memories: memories || null,
+        suggestion: 'No project found. Run /forge:new to create a project, then /forge:plan to set up phases before resuming'
+      });
       return;
     }
 
@@ -1811,11 +1814,14 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools health <project-bead-id>');
     }
+    validateId(projectId);
 
-    const project = bdJson(`show ${projectId}`);
+    let project;
+    try {
+      project = bdJson(`show ${projectId}`);
+    } catch { /* INTENTIONALLY SILENT — bd show exits non-zero for missing IDs; handled below */ }
     if (!project) {
-      output({ error: 'Project not found', project_id: projectId });
-      return;
+      forgeError('NOT_FOUND', `Project not found: ${projectId}`, 'Verify the project ID with: forge-tools find-project, or run /forge:new to create a new project', { project_id: projectId });
     }
 
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -2022,7 +2028,7 @@ module.exports = {
       severity: globalSettingsOk ? 'ok' : 'warning',
     });
 
-    const forgeDir = path.join(homedir(), '.claude', 'forge');
+    const forgeDir = path.join(os.homedir(), '.claude', 'forge');
 
     const expectedFiles = [
       { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
@@ -2059,7 +2065,7 @@ module.exports = {
       try {
         versionInfo = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
         versionOk = !!(versionInfo && versionInfo.version);
-      } catch { /* invalid JSON */ }
+      } catch { /* INTENTIONALLY SILENT: invalid or missing JSON data is handled by null fallback */ }
     }
 
     diagnostics.installation.push({
@@ -2199,7 +2205,7 @@ module.exports = {
         existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         if (bodyMatch) body = bodyMatch[1];
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       setNestedKey(existing, topKey, subKey, parsedValue);
       writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
       output({ ok: true, scope, key, value: parsedValue });
@@ -2208,7 +2214,7 @@ module.exports = {
       let existing = {};
       try {
         existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       setNestedKey(existing, topKey, subKey, parsedValue);
       const dir = path.dirname(projectPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -2249,14 +2255,14 @@ module.exports = {
         const body = bodyMatch ? bodyMatch[1] : '';
         clearNestedKey(existing, topKey, subKey);
         writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-      } catch { /* file doesn't exist, nothing to clear */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     } else if (scope === 'project') {
       const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       try {
         const existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
         clearNestedKey(existing, topKey, subKey);
         fs.writeFileSync(projectPath, toSimpleYaml(existing));
-      } catch { /* file doesn't exist */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     }
 
     output({ ok: true, scope, key, cleared: true });
@@ -2290,7 +2296,7 @@ module.exports = {
         existing = parseFrontmatter(text);
         const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
         if (bodyMatch) body = bodyMatch[1];
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
         const parsedValue = coerceBool(value);
@@ -2303,7 +2309,7 @@ module.exports = {
       let existing = {};
       try {
         existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* new file */ }
+      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
       for (const [key, value] of Object.entries(updates)) {
         if (!(key in SETTINGS_DEFAULTS)) continue;
         const parsedValue = coerceBool(value);
@@ -2407,7 +2413,8 @@ module.exports = {
     const raw = bd('kv list --json', { allowFail: true });
     let kvMap = {};
     if (raw) {
-      try { kvMap = JSON.parse(raw); } catch { /* ignore */ }
+      // INTENTIONALLY SILENT: bd kv list may return non-JSON; empty map is safe fallback
+      try { kvMap = JSON.parse(raw); } catch { /* allowFail JSON parse fallback */ }
     }
     if (Array.isArray(kvMap)) {
       const obj = {};
@@ -2446,8 +2453,9 @@ module.exports = {
    */
   'debug-list'() {
     const result = bd('list --label forge:debug --status open --json', { allowFail: true });
+    const debugHint = 'No active debug sessions. Start one with: forge-tools debug-create <slug>';
     if (!result) {
-      output({ sessions: [] });
+      output({ sessions: [], suggestion: debugHint });
       return;
     }
     try {
@@ -2462,7 +2470,9 @@ module.exports = {
       }));
       output({ sessions });
     } catch {
-      output({ sessions: [] });
+      // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
+      // This is not a fatal error -- the user simply has no debug sessions.
+      output({ sessions: [], suggestion: debugHint });
     }
   },
 
@@ -2502,6 +2512,7 @@ module.exports = {
     if (!id || !field) {
       forgeError('MISSING_ARG', 'Missing required arguments: id and field', 'Run: forge-tools debug-update <id> <field> <value>');
     }
+    validateId(id);
 
     if (field === 'notes') {
       bdArgs(['update', id, `--notes=${value}`], { allowFail: true });
@@ -2524,9 +2535,10 @@ module.exports = {
    * List pending forge:todo beads.
    */
   'todo-list'() {
+    const todoHint = 'No open todos. Create one with: forge-tools todo-create <project-id> <title>';
     const result = bd('list --label forge:todo --status open --json', { allowFail: true });
     if (!result) {
-      output({ todo_count: 0, todos: [] });
+      output({ todo_count: 0, todos: [], suggestion: todoHint });
       return;
     }
     try {
@@ -2542,7 +2554,9 @@ module.exports = {
       }));
       output({ todo_count: todos.length, todos });
     } catch {
-      output({ todo_count: 0, todos: [] });
+      // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
+      // This is not a fatal error -- the user simply has no todos.
+      output({ todo_count: 0, todos: [], suggestion: todoHint });
     }
   },
 
@@ -2559,6 +2573,7 @@ module.exports = {
     if (!projectId || !title) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and title', 'Run: forge-tools todo-create <project-id> <title> [description] [area] [files]');
     }
+    validateId(projectId);
 
     const descParts = [description];
     if (area) descParts.push(`Area: ${area}`);
@@ -2590,10 +2605,12 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools milestone-list <project-id>');
     }
+    validateId(projectId);
 
     const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
+    // TODO(perf): N+1 subprocess -- calls bd children per milestone. Batch when bd CLI supports bulk queries.
     const result = milestones.map(m => {
       const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
@@ -2633,6 +2650,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools milestone-audit <milestone-id>');
     }
+    validateId(milestoneId);
 
     const milestone = bdJson(`show ${milestoneId}`);
     if (!milestone) {
@@ -2643,6 +2661,7 @@ module.exports = {
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
     const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
 
+    // TODO(perf): N+1 subprocess -- calls bd children per phase. Batch when bd CLI supports bulk queries.
     const phaseHealth = phases.map(phase => {
       const pIssues = normalizeChildren(bdJson(`children ${phase.id}`));
       const tasks = pIssues.filter(i => (i.labels || []).includes('forge:task'));
@@ -2657,6 +2676,7 @@ module.exports = {
       };
     });
 
+    // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Batch when bd CLI supports bulk queries.
     const reqCoverage = requirements.map(req => {
       const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
       let validators = [];
@@ -2664,7 +2684,7 @@ module.exports = {
         try {
           const deps = JSON.parse(depsRaw);
           validators = Array.isArray(deps) ? deps : (deps.dependencies || []);
-        } catch { /* parse error */ }
+        } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
       }
       const closedValidators = validators.filter(v => v.status === 'closed');
       let coverage = 'unsatisfied';
@@ -2712,10 +2732,12 @@ module.exports = {
     if (!projectId || !name) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and milestone-name', 'Run: forge-tools milestone-create <project-id> <milestone-name>');
     }
+    validateId(projectId);
 
     const title = `Milestone: ${name}`;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; null fallback triggers forgeError below.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create milestone bead', 'Check bd connectivity with: bd list --limit 1');
@@ -2749,6 +2771,7 @@ module.exports = {
     const title = name;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
     let created;
+    // INTENTIONALLY SILENT: bd create output format varies; null fallback triggers forgeError below.
     try { created = JSON.parse(createRaw); if (Array.isArray(created)) created = created[0]; } catch { created = null; }
     if (!created || !created.id) {
       forgeError('COMMAND_FAILED', 'Failed to create monorepo bead', 'Check bd connectivity with: bd list --limit 1');
@@ -2762,6 +2785,7 @@ module.exports = {
     for (const pkg of detected.packages) {
       const childRaw = bdArgs(['create', `--title=${pkg.name}`, '--type=epic', '--priority=2', '--json']);
       let child;
+      // INTENTIONALLY SILENT: bd create output format varies; null fallback skips this package.
       try { child = JSON.parse(childRaw); if (Array.isArray(child)) child = child[0]; } catch { child = null; }
       if (!child || !child.id) continue;
 
@@ -2802,7 +2826,7 @@ module.exports = {
         const data = JSON.parse(projectResult);
         const issues = Array.isArray(data) ? data : (data.issues || []);
         if (issues.length > 0) project = issues[0];
-      } catch { /* parse error */ }
+      } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
     }
 
     const models = {
@@ -2913,6 +2937,8 @@ module.exports = {
         }
       }
     } catch {
+      // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
+      // the note is surfaced in the output for the user.
       bridgeNote = 'Bridge file not found or unreadable';
     }
 
@@ -2925,7 +2951,7 @@ module.exports = {
         try {
           const costRecord = JSON.parse(costRaw.trim());
           phaseCostUsd = costRecord.total_usd || 0;
-        } catch { /* ignore corrupt data */ }
+        } catch { /* INTENTIONALLY SILENT: corrupt cost data in bd kv falls back to null */ }
       }
     }
 
@@ -2982,7 +3008,7 @@ module.exports = {
       phase_cost_usd: phaseCostUsd,
       estimated_remaining_usd: estimatedRemainingUsd,
       suggested_action: suggestedAction,
-      _notes: bridgeNote ? { bridge: bridgeNote } : undefined,
+      ...(bridgeNote ? { _notes: { bridge: bridgeNote } } : {}),
     });
   },
 
@@ -2998,6 +3024,7 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-snapshot <phase-id>');
     }
+    validateId(phaseId);
 
     // 1. Read bridge file
     const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
@@ -3006,7 +3033,8 @@ module.exports = {
       const raw = fs.readFileSync(bridgePath, 'utf8');
       bridgeData = JSON.parse(raw);
     } catch {
-      // Bridge file missing or invalid
+      // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
+      // null bridgeData is handled by the warning output below.
     }
 
     if (!bridgeData || bridgeData.total_cost_usd === undefined || bridgeData.total_cost_usd === null) {
@@ -3031,7 +3059,8 @@ module.exports = {
       try {
         record = JSON.parse(existingRaw.trim());
       } catch {
-        // Corrupt data, start fresh
+        // INTENTIONALLY SILENT: corrupt cost record in bd kv is recoverable;
+        // starting fresh with null record is the correct self-healing behavior.
         record = null;
       }
     }
@@ -3065,11 +3094,15 @@ module.exports = {
       });
     }
 
-    // 5. Persist to bd kv
+    // 5. Store task_count so computeCostEstimate can avoid an N+1 lookup
+    const phaseChildren = normalizeChildren(bdJson(`children ${phaseId}`));
+    record.task_count = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
+
+    // 6. Persist to bd kv
     const serialized = JSON.stringify(record);
     bdArgs(['kv', 'set', kvKey, serialized]);
 
-    // 6. Output result
+    // 7. Output result
     output({
       ok: true,
       phase_id: phaseId,
@@ -3104,6 +3137,7 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-estimate <phase-id>');
     }
+    validateId(phaseId);
 
     const phase = bdJson(`show ${phaseId}`);
     if (!phase) {
@@ -3112,5 +3146,66 @@ module.exports = {
 
     const result = computeCostEstimate(phaseId);
     output({ phase_id: phaseId, ...result });
+  },
+
+  /**
+   * Detect current project state for the forge:help workflow.
+   *
+   * Returns structured JSON so the help workflow can decide between
+   * reference mode (existing project) and onboarding mode (no project).
+   *
+   * Usage: forge-tools help-context
+   *
+   * Output (onboarding):
+   *   { mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' }
+   *
+   * Output (reference):
+   *   { mode: 'reference', project_id, project_title, has_milestone, has_phases, active_phase_number }
+   */
+  'help-context'(_args) {
+    let project;
+    try {
+      project = resolveProject();
+    } catch (err) {
+      forgeError('BD_CONNECTION_ERROR', `Failed to detect project state: ${err.message}`, 'Check that bd is running and accessible');
+    }
+
+    if (!project) {
+      output({ mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' });
+      return;
+    }
+
+    // Gather milestone and phase information
+    let milestoneDetails, phases;
+    try {
+      const collected = collectProjectIssues(project.id);
+      milestoneDetails = collected.milestoneDetails;
+      phases = collected.phases;
+    } catch (err) {
+      forgeError('BD_CONNECTION_ERROR', `Failed to collect project data: ${err.message}`, 'Check that bd is running and accessible');
+    }
+
+    const hasMilestone = milestoneDetails.length > 0;
+    const hasPhases = phases.length > 0;
+
+    // Find active phase (in_progress first, then first open)
+    const activePhase = phases.find(p => p.status === 'in_progress')
+      || phases.find(p => p.status === 'open')
+      || null;
+
+    let activePhaseNumber = null;
+    if (activePhase) {
+      const match = (activePhase.title || '').match(/^Phase\s+([\d.]+)/i);
+      activePhaseNumber = match ? parseFloat(match[1]) : null;
+    }
+
+    output({
+      mode: 'reference',
+      project_id: project.id,
+      project_title: project.title,
+      has_milestone: hasMilestone,
+      has_phases: hasPhases,
+      active_phase_number: activePhaseNumber,
+    });
   },
 };

@@ -35,5 +35,9 @@ if (!commands[command]) {
 try {
   commands[command](args);
 } catch (err) {
-  forgeError('COMMAND_FAILED', `Error in ${command}: ${err.message}`, `Run: forge-tools ${command} --help or check arguments`, { command, error: err.message });
+  // Propagate specific error codes (e.g. BD_CONNECTION_ERROR) so consumers
+  // can distinguish infrastructure failures from logical command errors.
+  const code = err.code || 'COMMAND_FAILED';
+  const suggestion = err.suggestion || `Run: forge-tools ${command} --help or check arguments`;
+  forgeError(code, `Error in ${command}: ${err.message}`, suggestion, { command, error: err.message });
 }

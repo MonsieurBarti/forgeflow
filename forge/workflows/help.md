@@ -1,6 +1,25 @@
 <purpose>
-Display the complete Forge command reference. Output ONLY the reference content. Do NOT add project-specific analysis, git status, next-step suggestions, or any commentary beyond the reference.
+Display Forge help -- either a command reference for existing projects or an interactive
+onboarding flow for new users. The mode is determined by detecting the current project state.
 </purpose>
+
+<process>
+
+## 1. Detect Project State
+
+Run the help-context command to determine which mode to use:
+
+```bash
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" help-context)
+```
+
+Parse the JSON result. If `mode` is `"reference"`, jump to **Step 2 (Reference Mode)**.
+If `mode` is `"onboarding"`, jump to **Step 3 (Onboarding Mode)**.
+
+## 2. Reference Mode
+
+Output ONLY the reference content below. Do NOT add project-specific analysis, git status,
+next-step suggestions, or any commentary beyond the reference.
 
 <reference>
 # Forge Command Reference
@@ -251,3 +270,104 @@ Forge stores everything as beads:
 - `/forge:health` -- diagnose project issues
 - `/forge:settings` -- view/change workflow configuration
 </reference>
+
+**STOP here after displaying the reference. Do not continue to Step 3.**
+
+## 3. Onboarding Mode
+
+No Forge project was detected in the current directory. Guide the user through an interactive
+getting-started flow.
+
+### Step 1: Welcome and Intent
+
+Display a welcome message:
+
+> **Welcome to Forge!** No project detected in this directory.
+>
+> Forge is a project orchestration system for Claude Code. It helps you plan, execute, and
+> verify complex software projects through structured phases and tasks.
+
+Then use AskUserQuestion to ask what the user wants to do:
+
+```
+AskUserQuestion(
+  question: "What would you like to do?",
+  options: [
+    "Start a new project - Set up Forge for this codebase",
+    "Explore commands - See what Forge can do before committing",
+    "Troubleshoot - I expected a project to exist here"
+  ]
+)
+```
+
+### Step 2: Based on Choice
+
+**If "Start a new project":**
+
+Display:
+
+> To initialize a Forge project, run:
+>
+> ```
+> /forge:new
+> ```
+>
+> This will guide you through:
+> 1. Describing your project vision and goals
+> 2. Defining requirements with acceptance criteria
+> 3. Creating a phased roadmap with dependency ordering
+>
+> **Tip:** If you have an existing design doc or PRD, you can fast-track setup:
+> ```
+> /forge:new --auto @your-design-doc.md
+> ```
+
+Use AskUserQuestion:
+```
+AskUserQuestion(
+  question: "Ready to start?",
+  options: [
+    "Yes, run /forge:new now",
+    "Show me the full command reference first"
+  ]
+)
+```
+
+If "Yes, run /forge:new now" -- invoke `/forge:new` directly.
+If "Show me the full command reference first" -- display the reference content from Step 2.
+
+**If "Explore commands":**
+
+Display a curated subset of the most important commands:
+
+> ### Essential Commands
+>
+> | Command | What it does |
+> |---------|-------------|
+> | `/forge:new` | Initialize a project with vision, requirements, and roadmap |
+> | `/forge:plan <phase>` | Research and plan a phase with task breakdown |
+> | `/forge:execute <phase>` | Build a phase with parallel task execution |
+> | `/forge:verify <phase>` | Validate work against acceptance criteria |
+> | `/forge:quick <task>` | One-off task without full project setup |
+> | `/forge:progress` | Check project status and next steps |
+> | `/forge:debug <issue>` | Systematic debugging with persistent state |
+>
+> **The typical flow:** `/forge:new` --> `/forge:plan 1` --> `/forge:execute 1` --> `/forge:verify 1` --> repeat
+>
+> Run `/forge:help` again after creating a project to see the full command reference.
+
+**If "Troubleshoot":**
+
+Display:
+
+> Forge looks for a `forge:project` bead in your beads database. Here are common reasons
+> it might not be found:
+>
+> 1. **No beads database:** Run `bd init` to initialize beads in this repo, then `/forge:new`
+> 2. **Wrong directory:** Forge detects projects per-repo. Make sure you're in the right git root
+> 3. **Database not synced:** Run `bd dolt pull` to sync from remote
+> 4. **Project was created in a different repo:** Each repo has its own Forge project
+>
+> To check your beads status: `bd list --label forge:project`
+
+</process>

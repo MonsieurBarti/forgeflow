@@ -17,14 +17,21 @@ module.exports = {
    */
   'migrate-orphan-phases'() {
     const projectsRaw = bd('list --label forge:project --json', { allowFail: true });
+    const noProjectHint = 'Run /forge:new to create a project before migrating phases';
     if (!projectsRaw) {
-      output({ ok: true, message: 'No projects found', actions: [] });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
       return;
     }
-    const projectsData = JSON.parse(projectsRaw);
+    let projectsData;
+    try {
+      projectsData = JSON.parse(projectsRaw);
+    } catch {
+      output({ ok: false, message: 'Failed to parse project list from bd', suggestion: 'Check bd connectivity with: bd list --limit 1' });
+      return;
+    }
     const projects = Array.isArray(projectsData) ? projectsData : (projectsData.issues || []);
     if (projects.length === 0) {
-      output({ ok: true, message: 'No projects found', actions: [] });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
       return;
     }
 
@@ -37,12 +44,14 @@ module.exports = {
       const phases = children.filter(c => (c.labels || []).includes('forge:phase'));
       const milestones = children.filter(c => (c.labels || []).includes('forge:milestone'));
 
+      // TODO(perf): N+1 subprocess -- calls bd dep list per phase. Batch when bd CLI supports bulk queries.
       const orphanPhases = [];
       for (const phase of phases) {
         const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
         let deps = [];
         if (depsRaw) {
-          try { deps = JSON.parse(depsRaw); } catch {}
+          // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
+          try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
           if (!Array.isArray(deps)) deps = deps.dependencies || [];
         }
         const hasMilestoneParent = deps.some(d =>
