@@ -382,6 +382,11 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>
 
 Display to user. Best-effort -- if command fails, skip silently.
 
+If `estimated_cost_usd` is not null, display:
+> Estimated phase cost: $\<cost\> (\<confidence\> confidence, based on \<N\> phase(s))
+
+If null or the command fails, skip silently.
+
 ## 6.7. Implementation Preview & Approval Gate
 
 Generate a detailed implementation preview and present it to the user for approval before

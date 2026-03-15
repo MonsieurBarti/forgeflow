@@ -128,6 +128,108 @@ function detectBuildTest() {
   };
 }
 
+
+/**
+ * Kahn's algorithm: compute dependency waves for a set of tasks.
+ *
+ * Builds an intra-phase dependency graph from pre-fetched taskDeps and runs a
+ * BFS-style topological sort.  Tasks with unresolvable (circular / external)
+ * dependencies are collected in a final wave tagged `circular_or_external_dependency`.
+ *
+ * @param {Array<{id: string, status: string}>} tasks - Flat task list.
+ * @param {Object.<string, string[]>} taskDeps - Map of taskId -> array of dependency task IDs
+ *   that are intra-phase and non-closed (as produced by the dep-list loop in each caller).
+ * @returns {Array<{wave_number: number, tasks: Array, note?: string}>} Raw waves.
+ *   Each wave contains the task objects from `tasks`; callers may enrich them after the call.
+ */
+function computeWaves(tasks, taskDeps) {
+  const taskById = new Map(tasks.map(t => [t.id, t]));
+
+  const inDegree = {};
+  const dependents = {}; // taskId -> list of task IDs that depend on it
+  for (const task of tasks) {
+    inDegree[task.id] = (taskDeps[task.id] || []).length;
+    dependents[task.id] = [];
+  }
+  for (const task of tasks) {
+    for (const depId of (taskDeps[task.id] || [])) {
+      if (dependents[depId]) {
+        dependents[depId].push(task.id);
+      }
+    }
+  }
+
+  const waves = [];
+  const assigned = new Set();
+  // Seed: all tasks with zero in-degree
+  let currentWave = tasks.filter(t => inDegree[t.id] === 0);
+
+  while (currentWave.length > 0) {
+    waves.push({
+      wave_number: waves.length + 1,
+      tasks: currentWave,
+    });
+    const nextWave = [];
+    for (const t of currentWave) {
+      assigned.add(t.id);
+      for (const depId of (dependents[t.id] || [])) {
+        inDegree[depId]--;
+        if (inDegree[depId] === 0) {
+          nextWave.push(taskById.get(depId));
+        }
+      }
+    }
+    currentWave = nextWave;
+  }
+
+  // Handle circular or external dependencies (remaining unassigned tasks)
+  if (assigned.size < tasks.length) {
+    const remaining = tasks.filter(t => !assigned.has(t.id));
+    waves.push({
+      wave_number: waves.length + 1,
+      tasks: remaining,
+      note: 'circular_or_external_dependency',
+    });
+  }
+
+  return waves;
+}
+
+/**
+ * Read phase comments, parse JSON entries, and return context entries.
+ *
+ * Iterates over phase bead comments, silently skips non-JSON entries, and
+ * returns parsed objects that have an `agent` field.  When `agentFilter` is
+ * provided, only entries whose `agent` matches are returned.
+ *
+ * @param {string} phaseId - The phase bead ID.
+ * @param {string|null} [agentFilter] - If set, only entries with this agent value are returned.
+ *   Pass null (or omit) to return all entries that have an agent field.
+ * @returns {Array<Object>} Parsed context entry objects.
+ */
+function readAgentContextEntries(phaseId, agentFilter = null) {
+  const comments = bdJsonArgs(['comments', phaseId]);
+  if (!comments) return [];
+
+  const list = Array.isArray(comments) ? comments : (comments.comments || []);
+  const entries = [];
+
+  for (const c of list) {
+    const body = c.body || c.content || c.text || '';
+    try {
+      const parsed = JSON.parse(body);
+      if (!parsed.agent) continue;
+      if (agentFilter !== null && parsed.agent !== agentFilter) continue;
+      entries.push(parsed);
+    } catch {
+      // INTENTIONALLY SILENT: comments can be free-text (not JSON); skipping
+      // non-JSON comments is the expected behavior when filtering for context entries.
+    }
+  }
+
+  return entries;
+}
+
 module.exports = {
   // Expose helper for programmatic use by verify.md consumers and other callers
   detectBuildTest,
@@ -386,8 +488,6 @@ module.exports = {
     }
 
     const phaseTaskIds = new Set(tasks.map(t => t.id));
-
-    // Build taskById Map before the dep loop for O(1) lookups
     const taskById = new Map(tasks.map(t => [t.id, t]));
 
     // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
@@ -411,62 +511,19 @@ module.exports = {
       taskDeps[task.id] = intraPhaseDeps;
     }
 
-    // Kahn's algorithm: O(V+E) topological sort into dependency waves
-    const inDegree = {};
-    const dependents = {}; // taskId -> list of tasks that depend on it
-    for (const task of tasks) {
-      inDegree[task.id] = (taskDeps[task.id] || []).length;
-      dependents[task.id] = [];
-    }
-    for (const task of tasks) {
-      for (const depId of (taskDeps[task.id] || [])) {
-        if (dependents[depId]) {
-          dependents[depId].push(task.id);
-        }
-      }
-    }
+    // Delegate wave computation to shared helper (Kahn's algorithm, O(V+E))
+    const rawWaves = computeWaves(tasks, taskDeps);
 
-    const waves = [];
-    const assigned = new Set();
-    // Seed: all tasks with zero in-degree
-    let currentWave = tasks.filter(t => inDegree[t.id] === 0);
-
-    while (currentWave.length > 0) {
-      waves.push({
-        wave_number: waves.length + 1,
-        tasks: currentWave.map(t => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-        })),
-      });
-      const nextWave = [];
-      for (const t of currentWave) {
-        assigned.add(t.id);
-        for (const depId of (dependents[t.id] || [])) {
-          inDegree[depId]--;
-          if (inDegree[depId] === 0) {
-            nextWave.push(taskById.get(depId));
-          }
-        }
-      }
-      currentWave = nextWave;
-    }
-
-    // Handle circular or external dependencies (remaining unassigned tasks)
-    if (assigned.size < tasks.length) {
-      const remaining = tasks.filter(t => !assigned.has(t.id));
-      waves.push({
-        wave_number: waves.length + 1,
-        tasks: remaining.map(t => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          blocked_by: taskDeps[t.id] || [],
-        })),
-        note: 'circular_or_external_dependency',
-      });
-    }
+    // Enrich each wave with detect-waves specific fields
+    const waves = rawWaves.map(w => ({
+      ...w,
+      tasks: w.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        ...(w.note === 'circular_or_external_dependency' ? { blocked_by: taskDeps[t.id] || [] } : {}),
+      })),
+    }));
 
     const executableWaves = waves.map(w => ({
       ...w,
@@ -1076,27 +1133,8 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const comments = bdJsonArgs(['comments', phaseId]);
-    if (!comments) {
-      output({ phase_id: phaseId, contexts: [] });
-      return;
-    }
-
-    const list = Array.isArray(comments) ? comments : (comments.comments || []);
-    const contexts = [];
-
-    for (const c of list) {
-      const body = c.body || c.content || c.text || '';
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed.agent && parsed.status) {
-          contexts.push(parsed);
-        }
-      } catch {
-        // INTENTIONALLY SILENT: comments can be free-text (not JSON); skipping
-        // non-JSON comments is the expected behavior when filtering for context entries.
-      }
-    }
+    // All structured context entries (any agent, must have a status field)
+    const contexts = readAgentContextEntries(phaseId).filter(e => e.status);
 
     output({ phase_id: phaseId, contexts });
   },
@@ -1250,41 +1288,28 @@ module.exports = {
     }
 
     // --- Read forge-architect context from phase comments ---
-    // Uses the same context-read pattern: parse JSON comments with agent field.
     let architectSummary = null;
     const architectNotesByTask = {};
 
-    const comments = bdJsonArgs(['comments', phaseId]);
-    if (comments) {
-      const list = Array.isArray(comments) ? comments : (comments.comments || []);
-      for (const c of list) {
-        const body = c.body || c.content || c.text || '';
-        let parsed;
-        // INTENTIONALLY SILENT: comments can be free-text (not JSON); skipping
-        // non-JSON comments is the expected behavior when filtering for context entries.
-        try { parsed = JSON.parse(body); } catch { continue; }
-        if (parsed.agent !== 'forge-architect') continue;
-
-        if (parsed.summary) {
-          architectSummary = String(parsed.summary);
+    for (const entry of readAgentContextEntries(phaseId, 'forge-architect')) {
+      if (entry.summary) {
+        architectSummary = String(entry.summary);
+      }
+      for (const f of (entry.findings || [])) {
+        if (!f.task) continue;
+        if (!architectNotesByTask[f.task]) {
+          architectNotesByTask[f.task] = [];
         }
-
-        for (const f of (parsed.findings || [])) {
-          if (!f.task) continue;
-          if (!architectNotesByTask[f.task]) {
-            architectNotesByTask[f.task] = [];
-          }
-          const note = [
-            f.severity ? `[${f.severity}]` : null,
-            f.description || null,
-            f.recommendation ? `Recommendation: ${f.recommendation}` : null,
-          ].filter(Boolean).join(' ');
-          if (note) architectNotesByTask[f.task].push(note);
-        }
+        const note = [
+          f.severity ? `[${f.severity}]` : null,
+          f.description || null,
+          f.recommendation ? `Recommendation: ${f.recommendation}` : null,
+        ].filter(Boolean).join(' ');
+        if (note) architectNotesByTask[f.task].push(note);
       }
     }
 
-    // --- Detect execution waves (reuses detect-waves Kahn's algorithm logic) ---
+    // --- Detect execution waves via shared helper (Kahn's algorithm, O(V+E)) ---
     const phaseTaskIds = new Set(tasks.map(t => t.id));
     const taskById = new Map(tasks.map(t => [t.id, t]));
 
@@ -1309,65 +1334,18 @@ module.exports = {
       taskDeps[task.id] = intraPhaseDeps;
     }
 
-    // Kahn's algorithm: O(V+E) topological sort into dependency waves
-    const inDegree = {};
-    const dependents = {};
-    for (const task of tasks) {
-      inDegree[task.id] = (taskDeps[task.id] || []).length;
-      dependents[task.id] = [];
-    }
-    for (const task of tasks) {
-      for (const depId of (taskDeps[task.id] || [])) {
-        if (dependents[depId]) {
-          dependents[depId].push(task.id);
-        }
-      }
-    }
-
-    const waves = [];
-    const assigned = new Set();
-    let currentWave = tasks.filter(t => inDegree[t.id] === 0);
-
-    while (currentWave.length > 0) {
-      waves.push({
-        wave_number: waves.length + 1,
-        tasks: currentWave.map(t => ({
-          id: t.id,
-          title: t.title,
-          files_affected: taskDesigns[t.id].files_affected,
-          approach: taskDesigns[t.id].approach,
-          complexity: taskDesigns[t.id].complexity,
-          architect_notes: architectNotesByTask[t.id] || [],
-        })),
-      });
-      const nextWave = [];
-      for (const t of currentWave) {
-        assigned.add(t.id);
-        for (const depId of (dependents[t.id] || [])) {
-          inDegree[depId]--;
-          if (inDegree[depId] === 0) {
-            nextWave.push(taskById.get(depId));
-          }
-        }
-      }
-      currentWave = nextWave;
-    }
-
-    // Handle circular or external dependencies (remaining unassigned tasks)
-    if (assigned.size < tasks.length) {
-      const remaining = tasks.filter(t => !assigned.has(t.id));
-      waves.push({
-        wave_number: waves.length + 1,
-        tasks: remaining.map(t => ({
-          id: t.id,
-          title: t.title,
-          files_affected: taskDesigns[t.id].files_affected,
-          approach: taskDesigns[t.id].approach,
-          complexity: taskDesigns[t.id].complexity,
-          architect_notes: architectNotesByTask[t.id] || [],
-        })),
-      });
-    }
+    // Enrich waves with implementation-preview specific fields after wave computation
+    const waves = computeWaves(tasks, taskDeps).map(w => ({
+      ...w,
+      tasks: w.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        files_affected: taskDesigns[t.id].files_affected,
+        approach: taskDesigns[t.id].approach,
+        complexity: taskDesigns[t.id].complexity,
+        architect_notes: architectNotesByTask[t.id] || [],
+      })),
+    }));
 
     // --- Compute total files affected (deduplicated across all tasks) ---
     const allFiles = new Set();
