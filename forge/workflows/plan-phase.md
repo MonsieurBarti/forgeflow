@@ -261,6 +261,59 @@ Add intra-phase dependencies ONLY when task B truly needs task A's output:
 bd dep add <task-b-id> <task-a-id>
 ```
 
+## 5.5. Architect Review (Advisory)
+
+This step is **advisory and non-blocking**. The workflow proceeds to plan verification regardless of the architect's findings or any failure in this step.
+
+Resolve the model for the architect agent:
+```bash
+MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
+```
+
+Spawn a **forge-architect** agent:
+
+```
+Agent(subagent_type="forge-architect", model="<resolved model or omit if null>", prompt="
+Review the proposed tasks for architectural adherence:
+
+Phase: <phase title> (<phase-id>)
+Description: <phase description>
+Project: <project-id>
+
+Tasks created in this phase:
+<for each task created in step 5:>
+- <task-id>: <task-title>
+  Acceptance criteria: <task acceptance criteria>
+</end task list>
+
+Project conventions (from CLAUDE.md):
+<contents of project CLAUDE.md>
+
+Review each task against the project's architectural conventions and patterns.
+Check for:
+1. Adherence to established project patterns and conventions
+2. Consistency with existing architecture (file structure, naming, module boundaries)
+3. Potential architectural concerns (coupling, layering violations, missing abstractions)
+4. Alignment with project-level standards documented in CLAUDE.md
+
+Write your findings as structured JSON context on the phase bead:
+node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
+  \"agent\": \"forge-architect\",
+  \"status\": \"completed\",
+  \"findings\": [
+    { \"task\": \"<task-id>\", \"severity\": \"suggestion\"|\"concern\", \"description\": \"...\", \"recommendation\": \"...\" }
+  ],
+  \"summary\": \"<one-line overall architectural assessment>\"
+}'
+
+If all tasks look good, write findings as an empty array with a positive summary.
+")
+```
+
+**On failure or timeout:** Log a warning ("Architect review skipped -- agent failed or timed out") and continue to plan verification. Do **not** abort the workflow.
+
+The planner and plan-checker can review the architect's advisory findings via context-read on the phase bead in subsequent steps.
+
 ## 6. Verify Plan (Plan Verification Loop)
 
 Run automated checks:
