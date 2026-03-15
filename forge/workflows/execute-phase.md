@@ -89,12 +89,12 @@ If `verdict` is `PASS`, continue to the next step.
 Before execution begins, capture state needed for potential rollback:
 
 ```bash
-# Get tasks already closed before this execution run
-PRE_CLOSED=$(bd children <phase-id> --json | jq -c '[.[] | select(.status == "closed") | .id]')
+# Get tasks already closed before this execution run (properly quoted for JSON safety)
+PRE_CLOSED="$(bd children <phase-id> --json | jq -c '[.[] | select(.status == "closed") | .id]')"
 
 # Current branch and commit SHA
-BRANCH=$(git branch --show-current)
-BASE_SHA=$(git rev-parse HEAD)
+BRANCH="$(git branch --show-current)"
+BASE_SHA="$(git rev-parse HEAD)"
 ```
 
 Store these values (`preExistingClosed`, `branchName`, `baseCommitSha`) in every

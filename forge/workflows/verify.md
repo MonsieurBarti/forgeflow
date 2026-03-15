@@ -169,16 +169,20 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load
 
 > Settings should be loaded once and cached for the entire workflow run.
 
-- If `quality_gate` is `false`: skip, proceed to step 9.
+- If `quality_gate` is `false`: skip, proceed to step 9 (step 8 self-skips when quality gate was not run).
 - If `true` (or not explicitly false): run quality gate pipeline.
 
 **Scope changed files:**
 ```bash
-BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
+BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null || true)
+if [ -z "$BASE" ]; then
+  echo "WARNING: Could not determine merge-base (neither main nor master found). Skipping quality gate."
+  # Skip quality gate entirely rather than diffing the entire repo
+fi
 CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
 ```
 
-If no files changed, skip silently.
+If `BASE` is empty, skip the quality gate entirely rather than auditing every file in the repo. If no files changed, skip silently.
 
 **Run quality gate:** Follow `@~/.claude/forge/workflows/quality-gate.md`, passing changed files as scope. Spawns audit agents, collects findings, presents to user.
 

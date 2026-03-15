@@ -239,9 +239,14 @@ function bdJson(args) {
   } catch {
     // INTENTIONALLY SOFT FAILURE: bd sometimes returns non-JSON output (e.g. error
     // messages, empty results). Callers check for null and handle accordingly.
-    // Logged to stderr for debugging but not fatal.
-    const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-    console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
+    // Raw output redacted to prevent sensitive data leaking to stderr.
+    if (process.env.FORGE_DEBUG) {
+      const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
+      console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
+    } else {
+      const cmdName = args.split(/\s+/)[0] || 'unknown';
+      console.error(`[bdJson] JSON parse failure for command "${cmdName}" (${raw.length} bytes)`);
+    }
     return null;
   }
 }
@@ -261,8 +266,14 @@ function bdJsonArgs(argList) {
     return parsed;
   } catch {
     // INTENTIONALLY SOFT FAILURE: same rationale as bdJson -- callers check for null.
-    const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-    console.error('[bdJsonArgs] Parse failure for:', argList.join(' '), 'raw:', truncated);
+    // Raw output redacted to prevent sensitive data leaking to stderr.
+    if (process.env.FORGE_DEBUG) {
+      const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
+      console.error('[bdJsonArgs] Parse failure for:', argList.join(' '), 'raw:', truncated);
+    } else {
+      const cmdName = argList[0] || 'unknown';
+      console.error(`[bdJsonArgs] JSON parse failure for command "${cmdName}" (${argList.length} args, ${raw.length} bytes)`);
+    }
     return null;
   }
 }
