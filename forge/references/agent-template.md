@@ -8,7 +8,7 @@ you do not need.
 
 - **Under 200 lines.** Most agents land between 100-160 lines. If yours exceeds 200,
   you are probably encoding domain knowledge that belongs in a reference doc instead.
-  The debugger (351 lines) and codebase-mapper (406 lines) are outliers with good
+  The debugger (~400 lines) and codebase-mapper (~400 lines) are outliers with good
   reason -- do not use them as sizing models.
 - **Vibe implies behavioral bias.** The vibe is not a job title or description. It
   tells the agent HOW to behave, not WHAT it does. Good: "Trust but verify -- then

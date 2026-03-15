@@ -171,25 +171,30 @@ NODE_DEBUG=http,net node dist/main.js 2>&1 | head -200
 **Situation:** NestJS dependency injection failures, missing providers, or configuration issues.
 
 ```bash
-DEBUG=* node dist/main.js 2>&1 | head -300
-node -e "require('dotenv').config(); console.log(JSON.stringify(process.env, null, 2))" | grep -i "DATABASE\|API\|SECRET\|PORT"
+# Scope DEBUG to the specific namespace needed -- NEVER use DEBUG=* in production:
+DEBUG=nest:* node dist/main.js 2>&1 | head -300
+# Check specific env vars by name -- NEVER dump full process.env (leaks secrets):
+node -e "['DATABASE_HOST','PORT','NODE_ENV'].forEach(k=>console.log(k+'='+process.env[k]))"
 LOG_LEVEL=verbose node dist/main.js 2>&1 | head -200
 ```
 
-**Interpretation:** `DEBUG=*` exposes internal module debug output including NestJS DI resolution. Missing providers show as `Nest could not find {Token}`. Environment variable dumps reveal misconfigured or missing values that differ between environments.
+**Interpretation:** Scoped `DEBUG=nest:*` exposes NestJS DI resolution without leaking third-party module secrets. Missing providers show as `Nest could not find {Token}`. Targeted env var checks reveal misconfigured values without exposing the full environment.
+
+**SECURITY:** Never dump full `process.env` or use `DEBUG=*` — both commonly surface connection strings, API keys, and tokens. Always scope to the specific namespace or variable names needed.
 
 ### 6. Process Profiling and Signal Debugging
 
 **Situation:** Suspected memory leaks, CPU hotspots, or need to inspect a running process state.
 
 ```bash
-node --prof dist/main.js & PID=$!; sleep 5; kill $PID
-node --prof-process isolate-*.log > profile.txt; head -80 profile.txt
+cd /tmp/forge-prof && node --prof /path/to/dist/main.js & PID=$!; sleep 5; kill $PID
+node --prof-process isolate-*.log > profile.txt; head -80 profile.txt; rm -f isolate-*.log
 node -e "const app = require('./dist/module'); console.log(JSON.stringify(process.memoryUsage()))"
+# Verify PID before signaling: ps -p <pid> -o comm= should show "node"
 kill -USR1 <pid>  # Node 12+ built-in heap snapshot
 ```
 
-**Interpretation:** Profile output shows ticks-per-function -- top entries are CPU hotspots. `process.memoryUsage()` fields: `heapUsed` growing across invocations indicates a leak; `rss` much larger than `heapTotal` suggests native memory issues. Heap snapshots saved as `.heapsnapshot` files for offline analysis.
+**Interpretation:** Profile output shows ticks-per-function -- top entries are CPU hotspots. `process.memoryUsage()` fields: `heapUsed` growing across invocations indicates a leak; `rss` much larger than `heapTotal` suggests native memory issues. Clean up profiling artifacts after analysis to avoid committing them.
 
 </cli_debugging_techniques>
 
@@ -208,6 +213,8 @@ A fix is verified when:
 <bead_state_protocol>
 
 All debug state persisted in the debug session bead (labeled `forge:debug`).
+
+**SECURITY:** Never write raw env var values, connection strings, tokens, or key material into bead notes or design fields. Summarize without reproducing secrets (e.g., "DATABASE_URL is set and non-empty" not the actual value).
 
 | Bead Field | Debug Concept | Update Pattern |
 |------------|---------------|----------------|
@@ -386,14 +393,10 @@ After checkpoint: orchestrator gets response, spawns fresh agent with bead ID + 
 
 </modes>
 
-<success_criteria>
-- [ ] Debug bead state loaded on start
-- [ ] Bead notes updated BEFORE each action
-- [ ] Evidence accumulated, eliminated hypotheses tracked
-- [ ] Can resume from any /clear via bd show
-- [ ] Root cause confirmed with evidence before fixing
-- [ ] Fix verified against original symptoms
-- [ ] Bead closed with reason after human confirmation
-- [ ] Durable insights saved via bd remember
-</success_criteria>
-</output>
+<success_metrics>
+- **State continuity:** Debug bead state loaded on start, updated BEFORE each action
+- **Evidence trail:** Evidence accumulated, eliminated hypotheses tracked, resumable via bd show
+- **Root cause rigor:** Confirmed with evidence before fixing
+- **Fix verified:** Against original symptoms, bead closed with reason after human confirmation
+- **Knowledge captured:** Durable insights saved via bd remember
+</success_metrics>
