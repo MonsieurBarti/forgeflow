@@ -10,13 +10,15 @@ const phaseCommands = require('./phase-commands.cjs');
 const projectCommands = require('./project-commands.cjs');
 const gitCommands = require('./git-commands.cjs');
 const roadmapCommands = require('./roadmap-commands.cjs');
+const qualityGateCommands = require('./quality-gate-commands.cjs');
 
 const commands = Object.assign(
   {},
   phaseCommands,
   projectCommands,
   gitCommands,
-  roadmapCommands
+  roadmapCommands,
+  qualityGateCommands
 );
 
 const [command, ...args] = process.argv.slice(2);
