@@ -272,10 +272,19 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
 
 Identify parent milestone. If none, skip silently.
 
-If milestone found, fetch forge:req beads:
+Requirements are owned by phases, not the milestone directly. Traverse milestone -> phases -> phase children to find all forge:req beads.
+
+If milestone found, get all phases under the milestone:
 ```bash
-bd dep list <milestone-id> --type contains --json
+bd children <milestone-id> --json
 ```
+
+Filter to forge:phase beads. For each phase, get its children:
+```bash
+bd children <phase-id> --json
+```
+
+Filter to forge:req beads. Collect all requirements across all phases.
 
 <!-- Known N+1 pattern: per-requirement bd dep list calls. Pending bd CLI batch query support. -->
 For each req, check validates links from this phase's tasks:
@@ -289,7 +298,7 @@ Build coverage map (covered vs uncovered). If uncovered reqs exist, show warning
  WARNING: Uncovered Requirements in Parent Milestone
 ------------------------------------------------------------
 
-  - <req-title> (<req-id>)
+  - <req-title> (<req-id>) (Phase: <phase-name>)
 
 To add coverage: bd dep add <task-id> <req-id> --type validates
 Or run /forge:audit-milestone to check full milestone coverage.

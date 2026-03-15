@@ -81,23 +81,7 @@ WORKTREE_PATH=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-path <mi
 bd remember --key "forge:milestone:<milestone-id>:worktree" "$WORKTREE_PATH"
 ```
 
-## 5. Define Requirements
-
-Based on the user's milestone goals, break them down into 5-12 concrete requirements.
-
-Present the full list to the user for review before creating any beads. Let them add, remove,
-or modify requirements. Iterate until they approve.
-
-For each approved requirement:
-```bash
-bd create --title="<requirement title>" \
-  --description="<what this requirement means and why it matters>" \
-  --type=feature --priority=<1-3> --json
-bd dep add <req-id> <milestone-id> --type=parent-child
-bd label add <req-id> forge:req
-```
-
-## 6. Research Decision (Optional)
+## 5. Research Decision (Optional)
 
 Use AskUserQuestion:
 - header: "Research"
@@ -124,9 +108,9 @@ Record key findings as notes on the milestone bead:
 bd update <milestone-id> --notes="Research findings: <key points>"
 ```
 
-**If "Skip research":** Continue to step 7.
+**If "Skip research":** Continue to step 6.
 
-## 7. Create Phased Roadmap
+## 6. Create Phased Roadmap
 
 Resolve the model for the roadmapper agent:
 ```bash
@@ -135,13 +119,16 @@ MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-roadm
 
 Use the Agent tool to spawn **forge-roadmapper** with (pass `model` if non-empty):
 - The project ID, milestone ID, and milestone goal
-- All requirement IDs with their titles and descriptions
+- The user's milestone goals (features, constraints, definition of done)
 - Phase numbering context (continue from last phase number)
 - Any user-specified constraints on ordering
 
-The roadmapper will analyze requirements and propose 3-8 phases.
+The roadmapper will:
+1. Break the milestone goals into 5-12 concrete requirements
+2. Propose 3-8 phases, assigning each requirement to the phase that delivers it
+3. Create forge:req beads as children of each phase
 
-Present the proposed phases to the user for review. Let them reorder, merge, split, or rename phases. Iterate until they approve.
+Present the proposed phases and their requirements to the user for review. Let them reorder, merge, split, rename phases, and add/remove/modify requirements. Iterate until they approve.
 
 Then create the approved phases:
 ```bash
@@ -152,7 +139,19 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" add-phase <project-id> <milestone
 This automatically wires each phase as a child of the milestone (parent-child dependency).
 No separate wiring step needed.
 
-## 8. Show Summary
+For each requirement, create it as a child of its owning phase:
+```bash
+bd create --title="<requirement title>" \
+  --description="<what this requirement means and why it matters>" \
+  --type=feature --priority=<1-3> --json
+bd dep add <req-id> <phase-id> --type=parent-child
+bd label add <req-id> forge:req
+```
+
+Requirements are owned by phases, not the milestone. Each phase explicitly declares which
+requirements it delivers.
+
+## 7. Show Summary
 
 Display the milestone structure:
 ```bash
@@ -177,7 +176,7 @@ bd remember --key "forge:session:last-milestone" "<milestone-id>"
 - [ ] Project found and context loaded
 - [ ] Milestone goals gathered from user
 - [ ] Milestone epic bead created with forge:milestone label
-- [ ] Requirements defined as forge:req beads under milestone
+- [ ] Requirements defined as forge:req beads under phases
 - [ ] Research completed (if selected)
 - [ ] Roadmapper spawned with phase numbering context
 - [ ] Phases created and wired to milestone and project

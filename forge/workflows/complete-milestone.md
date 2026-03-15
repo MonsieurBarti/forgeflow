@@ -109,12 +109,21 @@ Key accomplishments for this milestone:
 
 ## 5. Check Requirement Coverage
 
-List all requirements under the milestone:
+Requirements are owned by phases, not the milestone directly. Traverse milestone -> phases -> phase children to find all forge:req beads.
+
+Get all phases under the milestone:
 ```bash
 bd children <milestone-id> --json
 ```
 
-Filter to forge:req beads. For each requirement, check if any task validates it:
+Filter to forge:phase beads. For each phase, get its children:
+```bash
+bd children <phase-id> --json
+```
+
+Filter to forge:req beads. Collect all requirements across all phases.
+
+For each requirement, check if any task validates it:
 ```bash
 bd dep list <req-id> --type validates --json
 ```
@@ -122,15 +131,15 @@ bd dep list <req-id> --type validates --json
 Report coverage:
 ```
 Requirements: N/M satisfied
-- REQ: <title> -- SATISFIED (validated by <task-ids>)
-- REQ: <title> -- UNSATISFIED (no validating tasks found)
+- REQ: <title> (Phase: <phase-name>) -- SATISFIED (validated by <task-ids>)
+- REQ: <title> (Phase: <phase-name>) -- UNSATISFIED (no validating tasks found)
 ```
 
 Record unsatisfied requirements as known gaps in the retrospective.
 
 **Auto-close satisfied requirements:**
 
-For each open forge:req bead under the milestone that has `validates` links:
+For each open forge:req bead found via the phase traversal that has `validates` links:
 
 ```bash
 bd dep list <req-id> --type validates --json

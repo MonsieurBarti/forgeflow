@@ -61,7 +61,11 @@ Provide the agent with:
 
 ## 4. Check Requirements Coverage
 
-For each requirement under the milestone:
+Requirements are owned by phases, not the milestone directly. The milestone-audit tool
+(step 2) traverses milestone -> phases -> phase children to find all forge:req beads.
+Use the `requirements` and `uncovered_requirements` fields from the audit data.
+
+For each requirement found via the phase traversal:
 
 ```bash
 bd dep list <req-id> --type validates --json
