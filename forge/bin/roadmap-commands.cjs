@@ -22,7 +22,13 @@ module.exports = {
       output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
       return;
     }
-    const projectsData = JSON.parse(projectsRaw);
+    let projectsData;
+    try {
+      projectsData = JSON.parse(projectsRaw);
+    } catch {
+      output({ ok: false, message: 'Failed to parse project list from bd', suggestion: 'Check bd connectivity with: bd list --limit 1' });
+      return;
+    }
     const projects = Array.isArray(projectsData) ? projectsData : (projectsData.issues || []);
     if (projects.length === 0) {
       output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
@@ -38,6 +44,7 @@ module.exports = {
       const phases = children.filter(c => (c.labels || []).includes('forge:phase'));
       const milestones = children.filter(c => (c.labels || []).includes('forge:milestone'));
 
+      // TODO(perf): N+1 subprocess -- calls bd dep list per phase. Batch when bd CLI supports bulk queries.
       const orphanPhases = [];
       for (const phase of phases) {
         const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });

@@ -6,9 +6,9 @@
  *
  * Exports: parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
  *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJson, git, gh,
- *          output, forgeError, resolveAgentModel, loadModelProfile, loadModelOverrides,
- *          findGitRoot, resolveSettings, resolveSettingsPath, deepMerge,
- *          and all constants.
+ *          output, forgeError, validateId, resolveAgentModel, loadModelProfile,
+ *          loadModelOverrides, findGitRoot, resolveSettings, resolveSettingsPath,
+ *          deepMerge, and all constants.
  */
 
 const { execFileSync } = require('child_process');
@@ -291,6 +291,16 @@ function normalizeChildren(raw) {
   return Array.isArray(raw) ? raw : (raw?.issues || raw?.children || []);
 }
 
+/**
+ * Validate a bead/project/phase ID to prevent injection.
+ * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
+ */
+function validateId(id) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
+  }
+}
+
 function output(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
@@ -551,6 +561,7 @@ module.exports = {
   output,
   normalizeChildren,
   forgeError,
+  validateId,
   // Settings resolution
   findGitRoot,
   resolveSettings,

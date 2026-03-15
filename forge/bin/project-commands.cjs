@@ -15,9 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { homedir } = os;
 const {
-  bd, bdArgs, bdJson, output, forgeError, normalizeChildren,
+  bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -25,16 +24,6 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
-
-/**
- * Validate a bead/project ID to prevent injection.
- * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
- */
-function validateId(id) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
-    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
-  }
-}
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -533,11 +522,9 @@ function computeCostEstimate(phaseId) {
     try {
       const costData = JSON.parse(costRaw.trim());
       if (costData && typeof costData.total_usd === 'number' && costData.total_usd > 0) {
-        let taskCount = costData.task_count;
-        if (typeof taskCount !== 'number') {
-          const phaseChildren = normalizeChildren(bdJson(`children ${sibling.id}`));
-          taskCount = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
-        }
+        // Use stored task_count; default to 0 for historical records missing it
+        // (avoids an N+1 bdJson call per sibling phase).
+        const taskCount = typeof costData.task_count === 'number' ? costData.task_count : 0;
         if (taskCount > 0) {
           historicalCosts.push({ phase_id: sibling.id, total_usd: costData.total_usd, task_count: taskCount });
         }
@@ -1108,7 +1095,6 @@ function generateDashboardHTML(data) {
     margin-top: 0.1rem;
   }
 
-  .ms-body { }
   .section-title {
     font-size: 0.85rem;
     font-weight: 600;
@@ -1558,6 +1544,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools project-context <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1583,6 +1570,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases } = collectProjectIssues(projectId);
@@ -1614,6 +1602,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools full-progress <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements } = collectProjectIssues(projectId);
@@ -1655,6 +1644,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools generate-dashboard <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
@@ -1730,6 +1720,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools save-session <project-bead-id>');
     }
+    validateId(projectId);
 
     const { phases } = collectProjectIssues(projectId);
 
@@ -1823,6 +1814,7 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-bead-id', 'Run: forge-tools health <project-bead-id>');
     }
+    validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
     if (!project) {
@@ -2033,7 +2025,7 @@ module.exports = {
       severity: globalSettingsOk ? 'ok' : 'warning',
     });
 
-    const forgeDir = path.join(homedir(), '.claude', 'forge');
+    const forgeDir = path.join(os.homedir(), '.claude', 'forge');
 
     const expectedFiles = [
       { path: 'bin/forge-tools.cjs', label: 'forge-tools.cjs' },
@@ -2517,6 +2509,7 @@ module.exports = {
     if (!id || !field) {
       forgeError('MISSING_ARG', 'Missing required arguments: id and field', 'Run: forge-tools debug-update <id> <field> <value>');
     }
+    validateId(id);
 
     if (field === 'notes') {
       bdArgs(['update', id, `--notes=${value}`], { allowFail: true });
@@ -2577,6 +2570,7 @@ module.exports = {
     if (!projectId || !title) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and title', 'Run: forge-tools todo-create <project-id> <title> [description] [area] [files]');
     }
+    validateId(projectId);
 
     const descParts = [description];
     if (area) descParts.push(`Area: ${area}`);
@@ -2608,10 +2602,12 @@ module.exports = {
     if (!projectId) {
       forgeError('MISSING_ARG', 'Missing required argument: project-id', 'Run: forge-tools milestone-list <project-id>');
     }
+    validateId(projectId);
 
     const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
+    // TODO(perf): N+1 subprocess -- calls bd children per milestone. Batch when bd CLI supports bulk queries.
     const result = milestones.map(m => {
       const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
@@ -2651,6 +2647,7 @@ module.exports = {
     if (!milestoneId) {
       forgeError('MISSING_ARG', 'Missing required argument: milestone-id', 'Run: forge-tools milestone-audit <milestone-id>');
     }
+    validateId(milestoneId);
 
     const milestone = bdJson(`show ${milestoneId}`);
     if (!milestone) {
@@ -2661,6 +2658,7 @@ module.exports = {
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
     const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
 
+    // TODO(perf): N+1 subprocess -- calls bd children per phase. Batch when bd CLI supports bulk queries.
     const phaseHealth = phases.map(phase => {
       const pIssues = normalizeChildren(bdJson(`children ${phase.id}`));
       const tasks = pIssues.filter(i => (i.labels || []).includes('forge:task'));
@@ -2675,6 +2673,7 @@ module.exports = {
       };
     });
 
+    // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Batch when bd CLI supports bulk queries.
     const reqCoverage = requirements.map(req => {
       const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
       let validators = [];
@@ -2730,6 +2729,7 @@ module.exports = {
     if (!projectId || !name) {
       forgeError('MISSING_ARG', 'Missing required arguments: project-id and milestone-name', 'Run: forge-tools milestone-create <project-id> <milestone-name>');
     }
+    validateId(projectId);
 
     const title = `Milestone: ${name}`;
     const createRaw = bdArgs(['create', `--title=${title}`, '--type=epic', '--priority=1', '--json']);
@@ -3005,7 +3005,7 @@ module.exports = {
       phase_cost_usd: phaseCostUsd,
       estimated_remaining_usd: estimatedRemainingUsd,
       suggested_action: suggestedAction,
-      _notes: bridgeNote ? { bridge: bridgeNote } : undefined,
+      ...(bridgeNote ? { _notes: { bridge: bridgeNote } } : {}),
     });
   },
 
@@ -3021,6 +3021,7 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-snapshot <phase-id>');
     }
+    validateId(phaseId);
 
     // 1. Read bridge file
     const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
@@ -3090,11 +3091,15 @@ module.exports = {
       });
     }
 
-    // 5. Persist to bd kv
+    // 5. Store task_count so computeCostEstimate can avoid an N+1 lookup
+    const phaseChildren = normalizeChildren(bdJson(`children ${phaseId}`));
+    record.task_count = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
+
+    // 6. Persist to bd kv
     const serialized = JSON.stringify(record);
     bdArgs(['kv', 'set', kvKey, serialized]);
 
-    // 6. Output result
+    // 7. Output result
     output({
       ok: true,
       phase_id: phaseId,
@@ -3129,6 +3134,7 @@ module.exports = {
     if (!phaseId) {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-estimate <phase-id>');
     }
+    validateId(phaseId);
 
     const phase = bdJson(`show ${phaseId}`);
     if (!phase) {

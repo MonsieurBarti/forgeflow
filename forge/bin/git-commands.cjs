@@ -10,17 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bdJson, git, gh, output, forgeError, normalizeChildren } = require('./core.cjs');
-
-/**
- * Validate a bead/milestone ID to prevent path traversal.
- * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
- */
-function validateId(id) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
-    forgeError('INVALID_INPUT', `Invalid ID format: ${id}`, 'IDs must contain only lowercase letters, digits, and hyphens');
-  }
-}
+const { bdJson, git, gh, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
 
 /**
  * Resolve a worktree path and verify it stays within the expected base directory.
@@ -153,7 +143,7 @@ module.exports = {
     if (!branch) {
       forgeError('MISSING_ARG', 'Missing required argument: branch', 'Run: forge-tools branch-push <branch-name>');
     }
-    git(['push', '-u', 'origin', branch]);
+    git(['push', '-u', 'origin', '--', branch]);
     output({ pushed: true, branch });
   },
 
@@ -174,8 +164,7 @@ module.exports = {
     const children = bdJson(`children ${phaseId}`);
     const tasks = normalizeChildren(children);
 
-    // NOTE: N+1 subprocess pattern -- calls bd dep list per task.
-    // Requires bd CLI bulk query support to optimize further.
+    // TODO(perf): N+1 subprocess -- calls bd dep list per task. Batch when bd CLI supports bulk queries.
     const reqCoverage = [];
     for (const task of tasks) {
       const taskDeps = bdJson(`dep list ${task.id}`);
