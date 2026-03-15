@@ -33,6 +33,8 @@ const SETTINGS_DEFAULTS = {
   quality_gate: true,
   require_tests: true,
   web_ui: true,
+  shift_left_gates: true,
+  shift_left_enforcement: 'advisory',
 };
 
 const SETTINGS_DESCRIPTIONS = {
@@ -45,6 +47,15 @@ const SETTINGS_DESCRIPTIONS = {
   quality_gate: 'Run pre-PR quality pipeline (security, code review, performance audits)',
   require_tests: 'Require test suite to exist; hard-fail verify if no tests detected',
   web_ui: 'Use dev-server for interactive browser UIs in Phase 3+ workflows; when false, fall back to static HTML files and CLI prompts',
+  shift_left_gates: 'Run shift-left quality gates at plan-time and per-wave (architect, security, perf reviews)',
+  shift_left_enforcement: 'Shift-left gate mode: advisory (report findings) or enforced (halt on findings)',
+};
+
+// --- Settings Enum Constraints ---
+// Maps enum-valued settings to their allowed values.
+// Boolean settings are not listed here -- only string enums.
+const SETTINGS_ENUMS = {
+  shift_left_enforcement: ['advisory', 'enforced'],
 };
 
 // --- Model Profile Table ---
@@ -92,6 +103,10 @@ const ROLE_TO_AGENT = {
 };
 
 const DEFAULT_MODEL_PROFILE = 'balanced';
+
+// --- Dolt Timing Constants ---
+
+const DOLT_RESTART_WAIT_MS = 1000;
 
 // --- Simple YAML Helpers ---
 
@@ -181,7 +196,7 @@ function restartDolt() {
     // The entire forge-tools pipeline is synchronous (execFileSync-based), so
     // async alternatives cannot be used without a full architecture migration.
     // Migrate to async when the command layer supports it.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DOLT_RESTART_WAIT_MS);
   } catch (_) {
     // INTENTIONALLY SILENT: Restart is best-effort; the subsequent _bdExec retry
     // will surface the real failure if Dolt is still unreachable.
@@ -261,7 +276,7 @@ function bdJson(args) {
     // Raw output redacted to prevent sensitive data leaking to stderr.
     if (process.env.FORGE_DEBUG) {
       const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-      console.error('[bdJson] Parse failure for:', args, 'raw:', truncated);
+      console.error('[bdJson] Parse failure for:', args.split(/\s+/)[0], 'raw:', truncated);
     } else {
       const cmdName = args.split(/\s+/)[0] || 'unknown';
       console.error(`[bdJson] JSON parse failure for command "${cmdName}" (${raw.length} bytes)`);
@@ -617,6 +632,7 @@ module.exports = {
   PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS,
   SETTINGS_DESCRIPTIONS,
+  SETTINGS_ENUMS,
   MODEL_PROFILES,
   ROLE_TO_AGENT,
   DEFAULT_MODEL_PROFILE,

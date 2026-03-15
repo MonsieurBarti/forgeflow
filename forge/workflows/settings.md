@@ -83,6 +83,24 @@ AskUserQuestion([
       { label: "Yes", description: "Run security, code review, and performance audits before PR" },
       { label: "No", description: "Skip quality gate" }
     ]
+  },
+  {
+    question: "Run shift-left quality gates at plan-time and per-wave?",
+    header: "Shift-Left Gates",
+    multiSelect: false,
+    options: [
+      { label: "Yes", description: "Run architect, security, and perf reviews at plan-time and per-wave" },
+      { label: "No", description: "Skip shift-left gates, rely on pre-PR quality gate only" }
+    ]
+  },
+  {
+    question: "How should shift-left gate findings be handled?",
+    header: "Shift-Left Enforcement",
+    multiSelect: false,
+    options: [
+      { label: "Advisory", description: "Report findings but continue execution" },
+      { label: "Enforced", description: "Halt execution on findings and require user approval" }
+    ]
   }
 ])
 ```
@@ -95,6 +113,8 @@ Map answers to settings values:
 - Auto-Commit: Yes=true, No=false -> `auto_commit`
 - Parallel: Yes=true, No=false -> `parallel_execution`
 - Quality Gate: Yes=true, No=false -> `quality_gate`
+- Shift-Left Gates: Yes=true, No=false -> `shift_left_gates`
+- Shift-Left Enforcement: Advisory='advisory', Enforced='enforced' -> `shift_left_enforcement`
 </step>
 
 <step name="choose_scope">
@@ -162,7 +182,7 @@ Quick overrides:
 
 <success_criteria>
 - [ ] Current settings loaded from all layers
-- [ ] User presented with 7 workflow toggles
+- [ ] User presented with 9 workflow toggles (8 boolean + 1 enum)
 - [ ] User chose save scope (project/global/both)
 - [ ] Settings saved to chosen scope(s)
 - [ ] Final effective settings displayed with sources

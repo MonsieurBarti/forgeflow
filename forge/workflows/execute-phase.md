@@ -25,14 +25,6 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-### Cost Baseline
-
-Record the starting cost baseline for this phase so subsequent snapshots can compute deltas:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
-```
-If the bridge file is missing, this outputs a warning but does not block execution.
-
 ## 1.5. Snapshot Starting Cost
 
 Record cost baseline at phase start for token/cost tracking:
@@ -141,6 +133,11 @@ Before dispatching tasks, save a checkpoint (include rollback metadata from step
 node "$HOME/.claude/forge/bin/forge-tools.cjs" checkpoint-save <phase-id> '{"phaseId":"<phase-id>","completedWaves":[<previously completed wave numbers>],"currentWave":<N>,"taskStatuses":{<taskId>:<status>,...},"preExistingClosed":[<task IDs closed before execution>],"branchName":"<branch>","baseCommitSha":"<sha>","timestamp":"<ISO timestamp>"}'
 ```
 
+Capture the current HEAD SHA before dispatching tasks (used by the per-wave quality gate):
+```bash
+WAVE_START_SHA=$(git rev-parse HEAD)
+```
+
 For tasks in this wave that are `open` or `in_progress`:
 
 **Multiple independent tasks** — execute in **parallel** by spawning multiple forge-executor
@@ -199,6 +196,159 @@ Review the updated task statuses:
   - Skip and continue to next wave (if non-blocking)
   - Fix the issue inline (if quick)
   - Stop execution and report (if the blocker affects downstream waves)
+
+### Per-Wave Quality Gate
+
+This gate runs after each wave completes and before proceeding to the next wave. It is
+fault-tolerant: any error in the gate mechanism itself logs a warning and continues to the
+next wave. The gate must never crash the execution loop.
+
+**Step 1: Check if gate is enabled**
+
+```bash
+SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
+```
+
+Parse `shift_left_gates` from the settings JSON. If `shift_left_gates` is `false` or not
+present, skip this entire gate and proceed to the next wave.
+
+**Step 2: Compute wave-scoped changed files**
+
+Determine which files were changed by the tasks in the current wave only. Use the commit SHA
+captured before this wave started (`WAVE_START_SHA`, recorded from `git rev-parse HEAD` before
+dispatching the wave's tasks) and the current HEAD:
+
+```bash
+WAVE_START_SHA=<SHA captured before this wave's tasks were dispatched>
+WAVE_CHANGED_FILES=$(git diff --name-only "$WAVE_START_SHA"..HEAD)
+```
+
+If `WAVE_CHANGED_FILES` is empty (no files changed in this wave), skip the gate and proceed
+to the next wave.
+
+**Step 3: Resolve models and spawn audit agents in parallel**
+
+Resolve models for the two audit agents:
+
+```bash
+MODEL_SECURITY=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-security-auditor --raw)
+MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
+```
+
+Spawn both agents in parallel using two Agent tool calls in the same response:
+
+**Security Auditor:**
+```
+Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
+Audit the following files changed in wave <N> for security vulnerabilities.
+
+<changed_files>
+<WAVE_CHANGED_FILES>
+</changed_files>
+
+Scope your analysis to these files only. These are the files changed by the current
+execution wave, not the entire branch. Output your findings as raw JSON conforming to
+agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
+")
+```
+
+**Architect:**
+```
+Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
+Audit the following files changed in wave <N> for architectural violations and adherence issues.
+
+<changed_files>
+<WAVE_CHANGED_FILES>
+</changed_files>
+
+Scope your analysis to these files only. These are the files changed by the current
+execution wave, not the entire branch. Output your findings as raw JSON conforming to
+agents/schemas/audit-findings.md with subagent_type='forge-architect'.
+Do NOT wrap JSON in markdown fences.
+")
+```
+
+**Step 4: Parse agent responses tolerantly**
+
+Apply the same tolerant parsing logic as quality-gate.md step 4 to each agent's response:
+
+1. **Strip markdown fences**: Remove lines matching `` ```json `` or `` ``` ``.
+2. **Extract JSON object**: Find the first `{` and the last `}`, extract the substring.
+3. **Parse JSON**: Attempt `JSON.parse()` on the extracted string.
+4. **Validate structure**: Confirm the parsed object has `findings` (array). If missing,
+   treat as a parse failure for that agent.
+5. **Fallback on failure**: Record the agent as failed. Do not abort the gate.
+
+**Step 5: Handle partial agent failure**
+
+- If one agent fails, continue with the other agent's results.
+- If both agents fail, log a warning and continue to the next wave:
+
+```
+WARNING: Per-wave quality gate -- both audit agents failed for wave <N>. Continuing execution.
+```
+
+**Step 6: Apply enforcement mode**
+
+Parse `shift_left_enforcement` from the settings JSON loaded in step 1. Valid values are
+`advisory` (default) and `enforced`. If not present, default to `advisory`.
+
+Collect all findings from successful agents into a single list.
+
+**Advisory mode** (`shift_left_enforcement` is `advisory` or not set):
+
+Log findings as a context comment on the phase bead silently. No user interaction, no blocking:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{
+  "agent": "wave-quality-gate",
+  "task": "wave-<N>",
+  "status": "completed",
+  "findings": [
+    // all findings from successful agents, each with agent origin, severity, file, description
+  ]
+}'
+```
+
+Proceed to the next wave immediately.
+
+**Enforced mode** (`shift_left_enforcement` is `enforced`):
+
+Check if any finding has severity `critical` or `high`.
+
+If no critical/high findings exist, proceed to the next wave normally (advisory findings are
+still logged via context-write as above).
+
+If critical/high findings exist, halt execution and present findings via AskUserQuestion:
+
+Format each critical/high finding as a numbered item:
+
+```
+PER-WAVE QUALITY GATE -- Wave <N> findings (critical/high):
+
+  1. [CRITICAL] [security-auditor] src/api/auth.ts:42
+     Hardcoded database password in source
+
+  2. [HIGH] [architect] src/db/schema.ts:15
+     Layering violation: direct DB access from controller
+```
+
+```
+AskUserQuestion(
+  question: "Wave <N> quality gate found critical/high issues. How to proceed?",
+  multiSelect: false,
+  options: [
+    "Approve and continue to next wave",
+    "Fix inline before continuing",
+    "Abort execution"
+  ]
+)
+```
+
+- **Approve and continue**: Log findings via context-write (same as advisory) and proceed.
+- **Fix inline**: Pause wave progression. The orchestrator should address the findings before
+  continuing. After fixes are applied, proceed to the next wave.
+- **Abort execution**: Stop the execution loop entirely. Report the findings and exit.
 
 ## 8. Phase Completion Check
 
