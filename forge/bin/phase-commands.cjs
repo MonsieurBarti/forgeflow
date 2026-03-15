@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
+  bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
 } = require('./core.cjs');
 
 module.exports = {
@@ -28,9 +28,9 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phaseRaw = bdJson(`show ${phaseId}`);
+    const phaseRaw = bdJsonArgs(['show', phaseId]);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
-    const children = bdJson(`children ${phaseId}`);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
@@ -66,7 +66,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const children = bdJson(`children ${phaseId}`);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
@@ -83,8 +83,8 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJson(`show ${phaseId}`);
-    const children = bdJson(`children ${phaseId}`);
+    const phase = bdJsonArgs(['show', phaseId]);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     const findings = [];
@@ -124,7 +124,7 @@ module.exports = {
     const parentId = phase?.parent || null;
     let uncoveredReqs = [];
     if (parentId) {
-      const projectChildren = bdJson(`children ${parentId}`);
+      const projectChildren = bdJsonArgs(['children', parentId]);
       const allIssues = normalizeChildren(projectChildren);
       const requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
@@ -132,7 +132,7 @@ module.exports = {
 
       // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Needs bd CLI batch-query support.
       for (const req of requirements) {
-        const depsRaw = bd(`dep list ${req.id} --direction=up --type validates --json`, { allowFail: true });
+        const depsRaw = bdArgs(['dep', 'list', req.id, '--direction=up', '--type', 'validates', '--json'], { allowFail: true });
         let deps = [];
         if (depsRaw) {
           // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
@@ -191,13 +191,13 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJson(`show ${phaseId}`);
-    const children = bdJson(`children ${phaseId}`);
+    const phase = bdJsonArgs(['show', phaseId]);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     const issues = [];
 
-    const depsRaw = bd(`dep list ${phaseId} --json`, { allowFail: true });
+    const depsRaw = bdArgs(['dep', 'list', phaseId, '--json'], { allowFail: true });
     let deps = [];
     if (depsRaw) {
       // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
@@ -212,7 +212,7 @@ module.exports = {
     for (const dep of blockerDeps) {
       const blockerId = dep.from || dep.source || dep.id;
       if (!blockerId || blockerId === phaseId) continue;
-      const blocker = bdJson(`show ${blockerId}`);
+      const blocker = bdJsonArgs(['show', blockerId]);
       if (blocker && blocker.status !== 'closed') {
         openBlockers.push({ id: blockerId, title: blocker.title, status: blocker.status });
       }
@@ -266,8 +266,8 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJson(`show ${phaseId}`);
-    const children = bdJson(`children ${phaseId}`);
+    const phase = bdJsonArgs(['show', phaseId]);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
@@ -283,7 +283,7 @@ module.exports = {
     // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
     const taskDeps = {};
     for (const task of tasks) {
-      const depsRaw = bd(`dep list ${task.id} --type blocks --json`, { allowFail: true });
+      const depsRaw = bdArgs(['dep', 'list', task.id, '--type', 'blocks', '--json'], { allowFail: true });
       let deps = [];
       if (depsRaw) {
         // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
@@ -397,12 +397,20 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid checkpoint JSON: ${err.message}`, 'Provide valid JSON as the second argument');
     }
 
-    // Create a new object instead of mutating the parsed input
-    const checkpoint = {
-      ...parsed,
-      timestamp: parsed.timestamp || new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-      phaseId: parsed.phaseId || phaseId,
-    };
+    // Allowlist: only spread known-safe checkpoint fields to prevent
+    // arbitrary external data from being written to bead notes.
+    const CHECKPOINT_ALLOWLIST = [
+      'phaseId', 'phase_id', 'completedWaves', 'currentWave', 'taskStatuses',
+      'preExistingClosed', 'branchName', 'baseCommitSha', 'timestamp', 'completed',
+    ];
+    const checkpoint = {};
+    for (const key of CHECKPOINT_ALLOWLIST) {
+      if (parsed[key] !== undefined) checkpoint[key] = parsed[key];
+    }
+    checkpoint.timestamp = checkpoint.timestamp || new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    checkpoint.phase_id = checkpoint.phase_id || parsed.phaseId || phaseId;
+    // Remove camelCase variant if present (normalize to snake_case)
+    delete checkpoint.phaseId;
 
     const checkpointJson = JSON.stringify(checkpoint);
     const notesValue = `forge:checkpoint ${checkpointJson}`;
@@ -412,7 +420,7 @@ module.exports = {
     const memoryKey = `forge:checkpoint:${phaseId}`;
     bdArgs(['remember', '--key', memoryKey, checkpointJson], { allowFail: true });
 
-    output({ saved: true, phaseId, checkpoint });
+    output({ saved: true, phase_id: phaseId, checkpoint });
   },
 
   /**
@@ -428,7 +436,7 @@ module.exports = {
     let checkpoint = null;
 
     try {
-      const phaseRaw = bdJson(`show ${phaseId}`);
+      const phaseRaw = bdJsonArgs(['show', phaseId]);
       const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
       const notes = phase?.notes || '';
       const match = notes.match(/forge:checkpoint\s+(\{[\s\S]*\})/);
@@ -474,14 +482,14 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phaseRaw = bdJson(`show ${phaseId}`);
+    const phaseRaw = bdJsonArgs(['show', phaseId]);
     const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
-    const children = bdJson(`children ${phaseId}`);
+    const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     // TODO(perf): N+1 subprocess -- calls bd show per task. Needs bd CLI batch-query support.
     const enrichedTasks = tasks.map(task => {
-      const raw = bdJson(`show ${task.id}`);
+      const raw = bdJsonArgs(['show', task.id]);
       const full = Array.isArray(raw) ? raw[0] : raw;
       return {
         id: task.id,
@@ -492,13 +500,21 @@ module.exports = {
       };
     });
 
+    // Tasks ready for verification: closed tasks OR in_progress tasks with EXECUTION_COMPLETE marker
+    const executionCompleteTasks = enrichedTasks.filter(
+      t => t.status === 'in_progress' && (t.notes || '').includes('EXECUTION_COMPLETE')
+    );
     const closedTasks = enrichedTasks.filter(t => t.status === 'closed');
-    const openTasks = enrichedTasks.filter(t => t.status !== 'closed');
+    const tasksToVerify = [...closedTasks, ...executionCompleteTasks];
+
+    // Tasks still open: exclude closed and exclude EXECUTION_COMPLETE tasks
+    const completedIds = new Set(tasksToVerify.map(t => t.id));
+    const openTasks = enrichedTasks.filter(t => !completedIds.has(t.id));
 
     const parentId = phase?.parent || null;
     let requirements = [];
     if (parentId) {
-      const projectChildren = bdJson(`children ${parentId}`);
+      const projectChildren = bdJsonArgs(['children', parentId]);
       const allIssues = normalizeChildren(projectChildren);
       requirements = allIssues.filter(i =>
         (i.labels || []).includes('forge:req')
@@ -507,7 +523,7 @@ module.exports = {
 
     output({
       phase: { id: phase?.id, title: phase?.title, status: phase?.status, parent: parentId },
-      tasks_to_verify: closedTasks,
+      tasks_to_verify: tasksToVerify,
       tasks_still_open: openTasks,
       total_tasks: tasks.length,
       total_closed: closedTasks.length,
@@ -529,7 +545,7 @@ module.exports = {
     validateId(projectId);
     validateId(milestoneId);
 
-    const milestone = bdJson(`show ${milestoneId}`);
+    const milestone = bdJsonArgs(['show', milestoneId]);
     if (!milestone || !milestone.id) {
       forgeError('NOT_FOUND', `Milestone '${milestoneId}' not found`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
@@ -537,7 +553,7 @@ module.exports = {
       forgeError('INVALID_STATE', `Milestone '${milestoneId}' is closed`, 'Phases can only be added to active milestones. Create a new milestone or reopen the existing one.', { milestoneId, status: milestone.status });
     }
 
-    const children = bdJson(`children ${milestoneId}`);
+    const children = bdJsonArgs(['children', milestoneId]);
     const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
@@ -561,8 +577,8 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bd(`dep add ${created.id} ${milestoneId} --type=parent-child`);
-    bd(`label add ${created.id} forge:phase`);
+    bdArgs(['dep', 'add', created.id, milestoneId, '--type=parent-child']);
+    bdArgs(['label', 'add', created.id, 'forge:phase']);
 
     if (phases.length > 0) {
       let lastPhase = null;
@@ -578,7 +594,7 @@ module.exports = {
         }
       }
       if (lastPhase) {
-        bd(`dep add ${created.id} ${lastPhase.id}`);
+        bdArgs(['dep', 'add', created.id, lastPhase.id]);
       }
     }
 
@@ -611,7 +627,7 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid phase number: ${afterPhaseArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
-    const children = bdJson(`children ${projectId}`);
+    const children = bdJsonArgs(['children', projectId]);
     const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
@@ -652,9 +668,9 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bd(`dep add ${created.id} ${projectId} --type=parent-child`);
-    bd(`label add ${created.id} forge:phase`);
-    bd(`dep add ${created.id} ${targetPhase.id}`);
+    bdArgs(['dep', 'add', created.id, projectId, '--type=parent-child']);
+    bdArgs(['label', 'add', created.id, 'forge:phase']);
+    bdArgs(['dep', 'add', created.id, targetPhase.id]);
 
     const nextPhaseNum = afterPhaseNum + 1;
     let nextPhase = null;
@@ -667,8 +683,8 @@ module.exports = {
     }
 
     if (nextPhase) {
-      bd(`dep remove ${nextPhase.id} ${targetPhase.id}`, { allowFail: true });
-      bd(`dep add ${nextPhase.id} ${created.id}`);
+      bdArgs(['dep', 'remove', nextPhase.id, targetPhase.id], { allowFail: true });
+      bdArgs(['dep', 'add', nextPhase.id, created.id]);
     }
 
     output({
@@ -700,7 +716,7 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid phase number: ${phaseNumArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
-    const children = bdJson(`children ${projectId}`);
+    const children = bdJsonArgs(['children', projectId]);
     const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
@@ -721,13 +737,13 @@ module.exports = {
       forgeError('INVALID_STATE', `Phase ${phaseNum} is ${targetPhase.status}`, 'Use --force flag to remove anyway: forge-tools remove-phase <project-id> <phase-number> --force', { phaseNumber: phaseNum, status: targetPhase.status });
     }
 
-    const phaseChildren = bdJson(`children ${targetPhase.id}`);
+    const phaseChildren = bdJsonArgs(['children', targetPhase.id]);
     const tasks = normalizeChildren(phaseChildren);
     if (tasks.length > 0 && !force) {
       forgeError('INVALID_STATE', `Phase ${phaseNum} has ${tasks.length} tasks`, 'Use --force flag to remove anyway: forge-tools remove-phase <project-id> <phase-number> --force', { phaseNumber: phaseNum, taskCount: tasks.length });
     }
 
-    const targetDepsRaw = bd(`dep list ${targetPhase.id} --json`, { allowFail: true });
+    const targetDepsRaw = bdArgs(['dep', 'list', targetPhase.id, '--json'], { allowFail: true });
     let targetDeps = [];
     if (targetDepsRaw) {
       // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
@@ -746,7 +762,7 @@ module.exports = {
     const successors = [];
     for (const phase of phases) {
       if (phase.id === targetPhase.id) continue;
-      const depsRaw = bd(`dep list ${phase.id} --json`, { allowFail: true });
+      const depsRaw = bdArgs(['dep', 'list', phase.id, '--json'], { allowFail: true });
       let deps = [];
       if (depsRaw) {
         // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist.
@@ -763,9 +779,9 @@ module.exports = {
     }
 
     for (const successor of successors) {
-      bd(`dep remove ${successor.id} ${targetPhase.id}`, { allowFail: true });
+      bdArgs(['dep', 'remove', successor.id, targetPhase.id], { allowFail: true });
       if (predecessorId) {
-        bd(`dep add ${successor.id} ${predecessorId}`);
+        bdArgs(['dep', 'add', successor.id, predecessorId]);
       }
     }
 
@@ -826,7 +842,7 @@ module.exports = {
     }
     validateId(projectId);
 
-    const children = bdJson(`children ${projectId}`);
+    const children = bdJsonArgs(['children', projectId]);
     const issues = normalizeChildren(children);
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
 
@@ -863,7 +879,7 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid phase number: ${phaseNumber}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
-    const children = bdJson(`children ${projectId}`);
+    const children = bdJsonArgs(['children', projectId]);
     if (!children) {
       output({ found: false, phase: null, suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId });
       return;
@@ -922,16 +938,18 @@ module.exports = {
       timestamp: new Date().toISOString(),
     };
 
-    const tmpFile = path.join(os.tmpdir(), `forge-ctx-${crypto.randomBytes(8).toString('hex')}.json`);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-'));
+    const tmpFile = path.join(tmpDir, 'ctx.json');
     fs.writeFileSync(tmpFile, JSON.stringify(schema, null, 2));
 
     try {
       bdArgs(['comments', 'add', phaseId, '-f', tmpFile]);
-      output({ written: true, phaseId, agent: schema.agent, task: schema.task });
+      output({ written: true, phase_id: phaseId, agent: schema.agent, task: schema.task });
     } finally {
-      // INTENTIONALLY SILENT: temp file cleanup is best-effort; failure to unlink
-      // a /tmp file does not affect the command's result.
+      // INTENTIONALLY SILENT: temp file/dir cleanup is best-effort; failure to remove
+      // a /tmp entry does not affect the command's result.
       try { fs.unlinkSync(tmpFile); } catch { /* cleanup best-effort */ }
+      try { fs.rmdirSync(tmpDir); } catch { /* cleanup best-effort */ }
     }
   },
 
@@ -945,9 +963,9 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const comments = bdJson(`comments ${phaseId}`);
+    const comments = bdJsonArgs(['comments', phaseId]);
     if (!comments) {
-      output({ phaseId, contexts: [] });
+      output({ phase_id: phaseId, contexts: [] });
       return;
     }
 
@@ -967,7 +985,7 @@ module.exports = {
       }
     }
 
-    output({ phaseId, contexts });
+    output({ phase_id: phaseId, contexts });
   },
 
   /**
@@ -982,7 +1000,7 @@ module.exports = {
     validateId(projectId);
 
     // Two-level traversal: project -> milestones -> phases (milestone hierarchy from Phase 9.1)
-    const children = bdJson(`children ${projectId}`);
+    const children = bdJsonArgs(['children', projectId]);
     const issues = normalizeChildren(children);
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
     const allIssues = [];
@@ -995,7 +1013,7 @@ module.exports = {
       }
     };
     for (const ms of milestones) {
-      const msChildren = bdJson(`children ${ms.id}`);
+      const msChildren = bdJsonArgs(['children', ms.id]);
       const msIssues = normalizeChildren(msChildren);
       addIssues(msIssues);
     }
@@ -1011,7 +1029,7 @@ module.exports = {
 
     // TODO(perf): N+1 subprocess -- calls bd comments per closed phase. Needs bd CLI batch-query support.
     for (const phase of phases) {
-      const comments = bdJson(`comments ${phase.id}`);
+      const comments = bdJsonArgs(['comments', phase.id]);
       if (!comments) continue;
 
       const list = Array.isArray(comments) ? comments : (comments.comments || []);

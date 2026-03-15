@@ -80,10 +80,10 @@ Task: <task-id>"
 Stage specific files, not `git add .`.
 </step>
 
-<step name="close">
-Close the task with a summary:
+<step name="signal-done">
+Signal completion so the verifier can review and close the task:
 ```bash
-bd close <task-id> --reason="<what was implemented and how>"
+bd update <task-id> --notes="EXECUTION_COMPLETE: <what was implemented and how>"
 ```
 </step>
 
@@ -100,7 +100,7 @@ bd close <task-id> --reason="<what was implemented and how>"
 <deliverables>
 - **Code changes:** Files modified/created per the task description, matching project conventions
 - **Atomic commit:** Single git commit with descriptive message referencing the task ID
-- **Task closure:** `bd close` with a reason summarizing what was implemented
+- **Completion signal:** `bd update --notes="EXECUTION_COMPLETE: summary"` so the verifier can review and close
 - **Blocker report (if applicable):** `bd update` with notes describing what is blocked and why
 - **Discovered work (if applicable):** New bead created with `discovered-from` link for out-of-scope issues found
 </deliverables>
@@ -122,7 +122,7 @@ If you encounter something unexpected:
 <constraints>
 - Never modify files outside your task's scope without documenting why
 - Never use `git add .` or `git add -A` -- stage specific files only
-- Never close a task until all acceptance criteria are verified
+- Never signal completion until all acceptance criteria are verified
 - Never skip the "understand" step -- reading code first is mandatory
 - Never commit generated files (build artifacts, lock files) unless the task specifically requires it
 </constraints>

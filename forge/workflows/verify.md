@@ -13,7 +13,7 @@ If a phase number was given, resolve it:
 PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
 CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
-Cache PROJECT and CONTEXT for reuse in later steps (e.g., step 9). Do NOT re-call these commands.
+Cache PROJECT and CONTEXT for reuse in later steps (e.g., step 10). Do NOT re-call these commands.
 
 Match phase number to ordered phases list. If a phase ID was given, use it directly. If no argument, find the current phase (most recent closed or in_progress).
 
@@ -25,7 +25,54 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" verify-phase <phase-id>
 
 Returns `tasks_to_verify` (closed tasks) and `tasks_still_open` (pending). Warn user if not all tasks are complete.
 
-## 3. Automated Verification
+## 3. Build/Test Gate
+
+Detect and run build/test commands from the project's package manager config files. If any command fails, verification is hard-blocked.
+
+### 3a. Detect build/test commands
+
+Check for project config files in the repo root:
+
+- **package.json**: read `scripts.build` and `scripts.test`. If `scripts.build` exists, queue `npm run build`. If `scripts.test` exists, queue `npm test`.
+- **Cargo.toml**: queue `cargo build` and `cargo test`.
+- **pyproject.toml**: if `pytest` appears in dependencies, queue `python -m pytest`. Otherwise queue `python -m unittest discover`.
+
+If none of these config files exist, log "No build/test config detected -- skipping Build/Test Gate." and proceed to Step 4.
+
+### 3b. Run detected commands
+
+Run queued commands sequentially: build commands first, then test commands. Track pass/fail status and output for each.
+
+### 3c. Evaluate results
+
+**If any command exits non-zero**, display a hard-block message and stop:
+
+```
+------------------------------------------------------------
+ BUILD/TEST GATE: FAILED
+------------------------------------------------------------
+
+  Command: <failed command>
+  Exit code: <code>
+  Output (last 20 lines):
+    <last 20 lines of stdout+stderr>
+
+Fix the build/test failure and re-run /forge:verify <phase>.
+Do NOT proceed to automated verification or any subsequent step.
+------------------------------------------------------------
+```
+
+Do NOT continue to Step 4 or any later step. Verification is blocked.
+
+**If all commands pass**, display a success note and continue:
+
+```
+BUILD/TEST GATE: PASSED (<N> commands run successfully)
+```
+
+Proceed to Step 4.
+
+## 4. Automated Verification
 
 For each task in `tasks_to_verify`, verify acceptance criteria programmatically:
 - Run existing tests (`npm test`, `cargo test`, `pytest`, etc.)
@@ -45,7 +92,7 @@ Record results:
 bd comments add <task-id> "Verification: <PASS|FAIL> - <details>"
 ```
 
-## 4. UAT with User
+## 5. UAT with User
 
 Present each task's acceptance criteria and automated verification results. Ask user to confirm via AskUserQuestion:
 - "Task: <title> -- Acceptance: <criteria> -- Auto-check: <PASS/FAIL>. Does this meet your expectations?"
@@ -57,11 +104,11 @@ bd reopen <task-id>
 bd update <task-id> --notes="UAT feedback: <user's feedback>"
 ```
 
-## 5. Update Phase Status
+## 6. Update Phase Status
 
 ### Hard Gate: Block Closure on Failed Verification
 
-Before calling `bd close`, tally verification verdicts from Steps 3 and 4.
+Before calling `bd close`, tally verification verdicts from Steps 4 and 5.
 
 **If any task has FAIL verdict** (automated or UAT rejection), MUST NOT close those tasks or the phase unless `--force` was passed.
 
@@ -83,6 +130,21 @@ Next steps:
 WARNING: Closing phase despite N failed task(s) -- --force override in effect.
 ```
 
+### Close Verified Tasks
+
+For each task that passed both automated and UAT verification, close it now.
+The verify workflow is the sole owner of task closure -- executors only signal completion.
+
+```bash
+bd close <task-id> --reason="Verified: <summary of verification outcome>"
+```
+
+Do NOT close tasks that failed verification. Failed tasks get reopened for rework:
+```bash
+bd reopen <task-id>
+bd update <task-id> --notes="Verification failed: <reason>"
+```
+
 ### Normal Closure (all verified or --force)
 
 All verified (or --force):
@@ -92,7 +154,7 @@ bd close <phase-id> --reason="All tasks verified via UAT"
 
 Some need rework (no --force): keep phase `in_progress`, report tasks needing attention, suggest `/forge:execute <phase>`.
 
-## 6. Quality Gate (Conditional Pre-PR Audit)
+## 7. Quality Gate (Conditional Pre-PR Audit)
 
 Runs only when phase is being closed. Skip if closure was blocked.
 
@@ -107,27 +169,31 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load
 
 > Settings should be loaded once and cached for the entire workflow run.
 
-- If `quality_gate` is `false`: skip, proceed to step 8.
+- If `quality_gate` is `false`: skip, proceed to step 9 (step 8 self-skips when quality gate was not run).
 - If `true` (or not explicitly false): run quality gate pipeline.
 
 **Scope changed files:**
 ```bash
-BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null)
+BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null || true)
+if [ -z "$BASE" ]; then
+  echo "WARNING: Could not determine merge-base (neither main nor master found). Skipping quality gate."
+  # Skip quality gate entirely rather than diffing the entire repo
+fi
 CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
 ```
 
-If no files changed, skip silently.
+If `BASE` is empty, skip the quality gate entirely rather than auditing every file in the repo. If no files changed, skip silently.
 
 **Run quality gate:** Follow `@~/.claude/forge/workflows/quality-gate.md`, passing changed files as scope. Spawns audit agents, collects findings, presents to user.
 
 After completion:
-- No findings: inform user, proceed to step 8.
+- No findings: inform user, proceed to step 9.
 - Findings present: user can approve/skip fixes via quality-gate workflow.
 - Fixes applied: fixer agent handles commits.
 - Sub-workflow aborted: treat as skipped.
 - User skips all: proceed normally.
 
-## 7. Re-verify After Quality Gate
+## 8. Re-verify After Quality Gate
 
 Runs only when phase is being closed. Skip if closure was blocked or quality gate was skipped.
 
@@ -135,46 +201,72 @@ Runs only when phase is being closed. Skip if closure was blocked or quality gat
 POST_QG_SHA=$(git rev-parse HEAD)
 ```
 
-- If `POST_QG_SHA == PRE_QG_SHA`: log "No quality gate changes -- skipping re-verification." Proceed to Step 8.
-- If different: re-run full automated verification on ALL tasks. Reuse `MODEL` from Step 3. For multi-task phases, spawn **forge-verifier** agent.
+- If `POST_QG_SHA == PRE_QG_SHA`: log "No quality gate changes -- skipping re-verification." Proceed to Step 9.
+- If different: re-run full automated verification on ALL tasks. Reuse `MODEL` from Step 4. For multi-task phases, spawn **forge-verifier** agent.
 
 ```bash
 bd comments add <task-id> "Re-verification (post quality gate): <PASS|FAIL> - <details>"
 ```
 
-Re-run UAT only for tasks that passed in Step 3 but failed in re-verification (regressions). Apply same hard gate as Step 5.
+Re-run UAT only for tasks that passed in Step 4 but failed in re-verification (regressions). Apply same hard gate as Step 6.
 
-## 8. Capture Phase Retrospective
+## 9. Capture Phase Retrospective
 
 Runs only when phase is being closed. Skip if blocked.
 
-**Derive counts:** `task_count` (verified + open), `blocker_count` (tasks with "BLOCKED" in notes), `forced` (--force flag).
+**Derive dynamic options from phase context:**
+- `completed_tasks`: titles of all verified/closed tasks from Step 2 (`tasks_to_verify`)
+- `blocked_tasks`: tasks whose notes contain "BLOCKED" (from `tasks_to_verify` and `tasks_still_open`)
 
-**Ask for effectiveness rating** via AskUserQuestion:
-- "How effective was the overall approach? Rate 1-5."
-- Options: "1 - Poor" / "2 - Below average" / "3 - Average" / "4 - Good" / "5 - Excellent"
+**Question 1 -- What went well** via AskUserQuestion (multiSelect: true):
+- Question: "What went well in this phase? Select all that apply."
+- Options:
+  - "Clean task execution"
+  - "Good acceptance criteria"
+  - "Effective parallel execution"
+  - One entry per completed task title: "Completed: <task-title>"
+  - "Other"
+  - "Nothing notable"
 
-**Ask for key lessons** via AskUserQuestion:
-- "Any key lessons learned? (Short sentence, or leave blank)"
-- Options: free text or "Skip"
+**Question 2 -- What did not go well** via AskUserQuestion (multiSelect: true):
+- Question: "What did not go well? Select all that apply."
+- Options:
+  - "Scope too large"
+  - "Unclear criteria"
+  - "Blockers delayed progress"
+  - "Verification found regressions"
+  - One entry per blocked task: "Blocked: <task-title> (<task-id>)"
+  - "Other"
+  - "Nothing notable"
 
-**Build context-write payload** (recognized fields: `agent`, `task`, `status`, `findings`, `decisions`, `blockers`, `artifacts`, `next_steps`):
-- **findings**: effectiveness rating, task count, lessons
-- **decisions**: "--force override" if used, else empty
-- **blockers**: one entry per blocked task if any
+**Question 3 -- Improvements for next time** via AskUserQuestion (multiSelect: true):
+- Question: "What improvements would you suggest? Select all that apply."
+- Options:
+  - "Smaller scope per phase"
+  - "Better acceptance criteria"
+  - "More upfront research"
+  - "Run tests earlier in the cycle"
+  - "Better dependency ordering"
+  - "Other"
+  - "No improvements needed"
+
+**Build context-write payload** from the 3 answers (recognized fields: `agent`, `task`, `status`, `findings`, `decisions`, `blockers`, `artifacts`, `next_steps`):
+- **findings**: all selected items from Question 1 (what went well)
+- **blockers**: all selected items from Question 2 (what didn't go well)
+- **decisions**: all selected items from Question 3 (improvements)
 
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> \
-  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: <N>/5","Task count: <N>","<lesson1>"],"decisions":["<if forced>"],"blockers":["<if any>"]}'
+  '{"agent":"forge-verifier","status":"completed","findings":["<went-well-1>","<went-well-2>"],"decisions":["<improvement-1>"],"blockers":["<didnt-go-well-1>"]}'
 ```
 
 Example:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
-  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: 4/5","Task count: 5","Parallel agents reduced wall time significantly"],"decisions":[],"blockers":["BLOCKED: Fix auth flow (task-xyz)"]}'
+  '{"agent":"forge-verifier","status":"completed","findings":["Clean task execution","Completed: Add retry logic"],"decisions":["Better acceptance criteria","Run tests earlier in the cycle"],"blockers":["Blockers delayed progress","Blocked: Fix auth flow (task-xyz)"]}'
 ```
 
-## 9. Requirement Coverage Check
+## 10. Requirement Coverage Check
 
 > Reuse the cached project-context-slim data from Step 1 to identify the parent milestone.
 
@@ -211,7 +303,7 @@ bd close <req-id> --reason="All validating tasks completed"
 
 Report auto-closed requirements. Skip reqs with no `validates` links.
 
-## 10. Push Branch and Create Pull Request
+## 11. Push Branch and Create Pull Request
 
 After phase closure and coverage check, push and open PR. Forge NEVER merges -- user reviews and merges.
 
