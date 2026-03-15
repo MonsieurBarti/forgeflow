@@ -7,7 +7,7 @@
  *           detect-waves, checkpoint-save, checkpoint-load, verify-phase,
  *           add-phase, insert-phase, remove-phase, list-phases,
  *           resolve-phase, context-write, context-read, retro-query,
- *           detect-build-test, implementation-preview
+ *           detect-build-test, implementation-preview, plan-interactive-review
  */
 
 const crypto = require('crypto');
@@ -16,8 +16,9 @@ const path = require('path');
 const os = require('os');
 const {
   bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
-  collectMilestoneRequirements, findGitRoot,
+  collectMilestoneRequirements, findGitRoot, resolveSettings,
 } = require('./core.cjs');
+const { serveAndAwaitDecision } = require('./dev-server.cjs');
 const { esc, COMPONENT_CSS, wrapPage, card, badge, tabs } = require('./design-system.cjs');
 
 /**
@@ -1458,6 +1459,110 @@ module.exports = {
     }));
 
     output({ ...data, waves });
+  },
+
+  /**
+   * Interactive plan review — serve plan UI via dev-server or fall back to
+   * AskUserQuestion when web_ui is disabled.
+   *
+   * Usage: forge-tools plan-interactive-review <phase-id>
+   *
+   * When web_ui=true: serves the interactive HTML page, waits for the user's
+   * decision, applies mutations (edits, comments, removals), then outputs the
+   * decision payload.
+   *
+   * When web_ui=false: outputs { fallback: true, data: <collectPlanData output> }
+   * so the calling workflow can use AskUserQuestion instead.
+   */
+  'plan-interactive-review'(args) {
+    const phaseId = args[0];
+    if (!phaseId) {
+      forgeError('MISSING_ARG', 'Missing required argument: phase-id',
+        'Run: forge-tools plan-interactive-review <phase-id>');
+    }
+    validateId(phaseId);
+
+    const settings = resolveSettings();
+    const data = collectPlanData(phaseId);
+
+    if (!settings.web_ui) {
+      output({ fallback: true, data });
+      return;
+    }
+
+    const html = generatePlanReviewHTML(data);
+
+    // Return a promise — index.cjs handles async dispatch
+    return serveAndAwaitDecision({
+      html,
+      title: 'Plan Review',
+      timeout: 1800000, // 30 minutes
+    }).then((decision) => {
+      // Apply mutations based on the decision payload
+      const { action, edits = [], comments = [], removals = [] } = decision || {};
+
+      if (action === 'reject') {
+        output({ action: 'reject' });
+        return;
+      }
+
+      // Apply edits
+      for (const edit of edits) {
+        const { taskId, field, value } = edit;
+        if (!taskId || !field || value === undefined) continue;
+        validateId(taskId);
+
+        if (field === 'title') {
+          bdArgs(['update', taskId, `--title=${value}`]);
+        } else if (field === 'description') {
+          bdArgs(['update', taskId, `--description=${value}`]);
+        } else if (field === 'acceptance_criteria') {
+          bdArgs(['update', taskId, `--acceptance=${value}`]);
+        } else if (field === 'approach' || field === 'files_affected') {
+          // Merge into existing design JSON
+          const taskRaw = bdJsonArgs(['show', taskId]);
+          const task = Array.isArray(taskRaw) ? taskRaw[0] : taskRaw;
+          let design = task.design || null;
+          if (typeof design === 'string') {
+            try { design = JSON.parse(design); } catch { design = {}; }
+          }
+          if (!design) design = {};
+
+          if (field === 'approach') {
+            design.approach = value;
+          } else if (field === 'files_affected') {
+            // Value is newline-separated file paths
+            design.files_affected = value.split('\n')
+              .map(p => p.trim())
+              .filter(Boolean);
+          }
+
+          bdArgs(['update', taskId, `--design=${JSON.stringify(design)}`]);
+        }
+      }
+
+      // Apply comments
+      for (const comment of comments) {
+        const { taskId, text } = comment;
+        if (!taskId || !text) continue;
+        validateId(taskId);
+        bdArgs(['comments', 'add', taskId, text]);
+      }
+
+      // Apply removals (hard close)
+      for (const taskId of removals) {
+        if (!taskId) continue;
+        validateId(taskId);
+        bdArgs(['close', taskId, '--reason=removed from plan']);
+      }
+
+      output({
+        action: 'approve',
+        edits_applied: edits.length,
+        comments_applied: comments.length,
+        removals_applied: removals.length,
+      });
+    });
   },
 };
 
