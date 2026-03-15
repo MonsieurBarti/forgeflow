@@ -270,60 +270,315 @@ Add intra-phase dependencies ONLY when task B truly needs task A's output:
 bd dep add <task-b-id> <task-a-id>
 ```
 
-## 5.5. Architect Review (Advisory)
+## 5.5. Plan-Time Quality Gate (Shift-Left)
 
-This step is **advisory and non-blocking**. The workflow proceeds to plan verification regardless of the architect's findings or any failure in this step.
+This step spawns three audit agents in parallel to review the planned tasks **before any code
+is written**. The agents review task descriptions, files_affected, and acceptance criteria --
+not code diffs, since no code exists yet.
 
-Resolve the model for the architect agent:
+The entire step is **non-blocking on failure/timeout**. If the gate mechanism itself errors,
+log a warning and continue to step 6.
+
+### 5.5a. Check shift_left_gates setting
+
 ```bash
-MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
+SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
 ```
 
-Spawn a **forge-architect** agent:
+Parse `shift_left_gates` from the settings JSON. It defaults to `true` if not present.
+
+**If `shift_left_gates` is `false`**: Log "Plan-time quality gate skipped (shift_left_gates=false)" and skip directly to step 6. Do not resolve models or spawn agents.
+
+**If `shift_left_gates` is `true` (default)**: Continue to 5.5b.
+
+Also parse `shift_left_enforcement` from the settings JSON. Valid values are `advisory`
+(default) and `enforced`. Store the value for use in step 5.5f.
+
+### 5.5b. Gather task data for review
+
+Collect the task design data from all tasks created in step 5. For each task, extract:
+- Task ID and title
+- Description
+- Acceptance criteria
+- `files_affected` from the task design JSON
+- `approach` from the task design JSON
+
+Format this into a `TASK_REVIEW_DATA` block:
 
 ```
-Agent(subagent_type="forge-architect", model="<resolved model or omit if null>", prompt="
-Review the proposed tasks for architectural adherence:
+<for each task created in step 5:>
+### Task: <task-id> -- <task-title>
+- Description: <task description>
+- Acceptance criteria: <task acceptance criteria>
+- Files affected: <files_affected from design JSON>
+- Approach: <approach from design JSON>
+</end task list>
+```
+
+### 5.5c. Resolve models for audit agents
+
+Resolve the model for each of the three audit agents. All three resolve calls are independent
+and can run in parallel:
+
+```bash
+MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
+MODEL_SECURITY=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-security-auditor --raw)
+MODEL_PERF=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-performance-auditor --raw)
+```
+
+If a model resolves to empty, omit the `model` parameter from the Agent call for that agent
+(the default model will be used).
+
+### 5.5d. Spawn three audit agents in parallel
+
+Spawn all three agents simultaneously using three Agent tool calls in the same response.
+Each agent receives the task data from step 5.5b -- NOT code diffs.
+
+**Architect:**
+```
+Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
+Review the following planned tasks for architectural issues. These are task PLANS, not code
+diffs -- no code has been written yet. Review the task descriptions, files_affected, acceptance
+criteria, and approach for potential problems.
 
 Phase: <phase title> (<phase-id>)
 Description: <phase description>
 Project: <project-id>
 
-Tasks created in this phase:
-<for each task created in step 5:>
-- <task-id>: <task-title>
-  Acceptance criteria: <task acceptance criteria>
-</end task list>
-
 Project conventions (from CLAUDE.md):
 <contents of project CLAUDE.md>
 
-Review each task against the project's architectural conventions and patterns.
+<TASK_REVIEW_DATA>
+
 Check for:
 1. Adherence to established project patterns and conventions
 2. Consistency with existing architecture (file structure, naming, module boundaries)
 3. Potential architectural concerns (coupling, layering violations, missing abstractions)
 4. Alignment with project-level standards documented in CLAUDE.md
+5. Whether files_affected lists are complete and reasonable for the described work
 
-Write your findings as structured JSON context on the phase bead:
-node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
+Output your findings as raw JSON (do NOT wrap in markdown fences):
+{
   \"agent\": \"forge-architect\",
-  \"status\": \"completed\",
   \"findings\": [
-    // Note: forge-architect uses its own severity taxonomy (suggestion/concern), which is
-    // separate from the audit findings schema (critical/high/medium/low/info).
-    { \"task\": \"<task-id>\", \"severity\": \"suggestion\"|\"concern\", \"description\": \"...\", \"recommendation\": \"...\" }
+    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
   ],
   \"summary\": \"<one-line overall architectural assessment>\"
-}'
+}
 
-If all tasks look good, write findings as an empty array with a positive summary.
+If all tasks look good, output findings as an empty array with a positive summary.
 ")
 ```
 
-**On failure or timeout:** Log a warning ("Architect review skipped -- agent failed or timed out") and continue to plan verification. Do **not** abort the workflow.
+**Security Auditor:**
+```
+Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
+Review the following planned tasks for security concerns. These are task PLANS, not code
+diffs -- no code has been written yet. Review the task descriptions, files_affected, acceptance
+criteria, and approach for potential security issues.
 
-The planner and plan-checker can review the architect's advisory findings via context-read on the phase bead in subsequent steps.
+Phase: <phase title> (<phase-id>)
+Description: <phase description>
+Project: <project-id>
+
+<TASK_REVIEW_DATA>
+
+Check for:
+1. Security risks in the planned approach (auth gaps, injection vectors, data exposure)
+2. Missing security-related acceptance criteria (input validation, auth checks, rate limiting)
+3. Sensitive files in files_affected that need extra scrutiny (credentials, configs, auth modules)
+4. Whether the planned approach follows security best practices for the domain
+
+Output your findings as raw JSON (do NOT wrap in markdown fences):
+{
+  \"agent\": \"forge-security-auditor\",
+  \"findings\": [
+    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
+  ],
+  \"summary\": \"<one-line overall security assessment>\"
+}
+
+If all tasks look good, output findings as an empty array with a positive summary.
+")
+```
+
+**Performance Auditor:**
+```
+Agent(subagent_type="forge-performance-auditor", model="<MODEL_PERF or omit>", prompt="
+Review the following planned tasks for performance concerns. These are task PLANS, not code
+diffs -- no code has been written yet. Review the task descriptions, files_affected, acceptance
+criteria, and approach for potential performance issues.
+
+Phase: <phase title> (<phase-id>)
+Description: <phase description>
+Project: <project-id>
+
+<TASK_REVIEW_DATA>
+
+Check for:
+1. Performance anti-patterns in the planned approach (N+1 queries, unbounded loops, missing caching)
+2. Missing performance-related acceptance criteria (pagination, indexing, lazy loading)
+3. Scalability concerns given the planned architecture
+4. Whether files_affected suggest high-traffic paths that need performance attention
+
+Output your findings as raw JSON (do NOT wrap in markdown fences):
+{
+  \"agent\": \"forge-performance-auditor\",
+  \"findings\": [
+    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
+  ],
+  \"summary\": \"<one-line overall performance assessment>\"
+}
+
+If all tasks look good, output findings as an empty array with a positive summary.
+")
+```
+
+### 5.5e. Parse agent responses tolerantly
+
+Apply the same tolerant parsing logic from quality-gate.md step 4 to each agent's response:
+
+1. **Strip markdown fences**: Remove lines matching `` ```json `` or `` ``` `` (with optional
+   leading/trailing whitespace). Also handle `` ```javascript `` or bare `` ``` `` fences.
+
+2. **Extract JSON object**: Find the first `{` and the last `}` in the response. Extract the
+   substring between them (inclusive). This handles leading/trailing commentary.
+
+3. **Parse JSON**: Attempt `JSON.parse()` (or equivalent) on the extracted string.
+
+4. **Validate structure**: Confirm the parsed object has `agent` (string) and `findings` (array).
+   If any required field is missing, treat it as a parse failure for that agent.
+
+5. **Fallback on failure**: If parsing fails at any step, record the agent as failed with the
+   raw response text for debugging. Do not abort the pipeline.
+
+### Handling partial agent failure
+
+After parsing all three agent responses, check which succeeded and which failed.
+
+**If all three agents failed**: Log a warning and continue to step 6. Do NOT block the workflow:
+
+```
+------------------------------------------------------------
+ WARNING: Plan-time quality gate -- all agents failed
+------------------------------------------------------------
+  Failed agents:
+  - <agent-name>: <error reason>
+
+  Continuing to plan verification.
+------------------------------------------------------------
+```
+
+**If 1-2 agents failed**: Continue with the results from agents that succeeded. Display a
+warning listing which agents failed:
+
+```
+------------------------------------------------------------
+ WARNING: Some plan-time audit agents failed
+------------------------------------------------------------
+  Failed agents:
+  - <agent-name>: <error reason>
+
+  Continuing with results from: <list of successful agents>
+------------------------------------------------------------
+```
+
+**If all three agents succeeded**: Proceed normally with no warning.
+
+### 5.5f. Store findings and check enforcement
+
+Collect all findings from successful agents into a single list. Each finding retains its
+`agent` field identifying the source agent.
+
+Store all findings via context-write on the phase bead:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{
+  "agent": "plan-time-gate",
+  "status": "completed",
+  "findings": [
+    { "agent": "<source-agent>", "task": "<task-id>", "severity": "<severity>", "title": "<title>", "description": "<description>", "recommendation": "<recommendation>" }
+  ],
+  "summary": "<combined summary from all agents>"
+}'
+```
+
+If no successful agents produced results, store a minimal context entry noting the gate was
+attempted but all agents failed.
+
+**Check enforcement mode** (from `shift_left_enforcement` parsed in step 5.5a):
+
+**When `shift_left_enforcement` is `advisory` (default)**: Log findings for visibility but
+do NOT block the workflow. Display a summary:
+
+```
+------------------------------------------------------------
+ Plan-Time Quality Gate: <N> finding(s) [advisory mode]
+------------------------------------------------------------
+  <for each finding:>
+  - [<SEVERITY>] [<agent>] <task-id>: <title>
+    <description>
+  </for each>
+
+  Mode: advisory -- findings logged, workflow continues.
+------------------------------------------------------------
+```
+
+If no findings, display:
+
+```
+------------------------------------------------------------
+ Plan-Time Quality Gate: PASSED -- No issues found [advisory mode]
+------------------------------------------------------------
+```
+
+Continue to step 6.
+
+**When `shift_left_enforcement` is `enforced` and NO critical findings exist**: Log findings
+(if any) and continue to step 6 normally:
+
+```
+------------------------------------------------------------
+ Plan-Time Quality Gate: PASSED [enforced mode]
+------------------------------------------------------------
+  <N> finding(s), none critical. Workflow continues.
+------------------------------------------------------------
+```
+
+**When `shift_left_enforcement` is `enforced` and critical findings exist**: Halt the
+workflow and present findings via AskUserQuestion:
+
+```
+------------------------------------------------------------
+ Plan-Time Quality Gate: BLOCKED [enforced mode]
+------------------------------------------------------------
+  <N> critical finding(s) require resolution before proceeding.
+
+  <for each critical finding:>
+  - [CRITICAL] [<agent>] <task-id>: <title>
+    <description>
+    Recommendation: <recommendation>
+  </for each>
+------------------------------------------------------------
+```
+
+```
+AskUserQuestion(
+  header: "Plan-time quality gate -- critical findings",
+  question: "Critical findings found in planned tasks. How do you want to proceed?",
+  multiSelect: false,
+  options: [
+    "Approve -- continue to plan verification despite critical findings",
+    "Fix -- update task descriptions/acceptance criteria to address findings, then re-plan",
+    "Abort -- stop planning and review findings"
+  ]
+)
+```
+
+- **Approve**: Log that the user approved critical findings and continue to step 6.
+- **Fix**: Stop the workflow. Suggest updating task details via `bd update <task-id>` to
+  address findings, then re-running `/forge:plan <phase>`.
+- **Abort**: Stop the workflow. Display the full findings for review.
 
 ## 6. Verify Plan (Plan Verification Loop)
 
