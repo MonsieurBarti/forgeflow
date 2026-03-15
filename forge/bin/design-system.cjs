@@ -182,12 +182,19 @@ function statusDot(status) {
 // ---------------------------------------------------------------------------
 // table -- styled HTML table
 // ---------------------------------------------------------------------------
+/**
+ * @param {string[]} [headers] - Column header labels; values are auto-escaped.
+ * @param {string[][]} [rows] - Table body rows; cell values are treated as
+ *   trusted HTML. Callers must pre-escape any dynamic content before passing
+ *   it as a cell value to prevent XSS.
+ * @param {string} [className] - Extra CSS class name(s) to add to the table.
+ */
 function table({ headers, rows, className } = {}) {
   const cls = ['ds-table'];
   if (className) cls.push(className);
   const headCells = (headers || []).map(h => `<th>${esc(h)}</th>`).join('');
   const bodyRows = (rows || []).map(row => {
-    const cells = row.map(cell => `<td>${cell}</td>`).join('');
+    const cells = row.map(cell => `<td>${esc(String(cell))}</td>`).join('');
     return `<tr>${cells}</tr>`;
   }).join('\n');
 

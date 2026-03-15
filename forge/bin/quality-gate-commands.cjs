@@ -240,11 +240,11 @@ module.exports = {
     // On Windows, 'start' is a shell builtin (not a binary), so we invoke
     // cmd.exe /c start instead; the empty '' arg is the window title.
     try {
+      // Validate reportPath is within os.tmpdir() on all platforms.
+      if (!reportPath.startsWith(os.tmpdir())) {
+        throw new Error('reportPath is outside os.tmpdir() -- refusing to open');
+      }
       if (process.platform === 'win32') {
-        // Validate reportPath is within os.tmpdir() before passing to cmd.exe.
-        if (!reportPath.startsWith(os.tmpdir())) {
-          throw new Error('reportPath is outside os.tmpdir() -- refusing to open');
-        }
         execFileSync('cmd.exe', ['/c', 'start', '', reportPath], { stdio: 'ignore' });
       } else {
         const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
