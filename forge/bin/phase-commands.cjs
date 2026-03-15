@@ -6,7 +6,8 @@
  * Commands: phase-context, phase-ready, plan-check, preflight-check,
  *           detect-waves, checkpoint-save, checkpoint-load, verify-phase,
  *           add-phase, insert-phase, remove-phase, list-phases,
- *           resolve-phase, context-write, context-read, retro-query
+ *           resolve-phase, context-write, context-read, retro-query,
+ *           detect-build-test
  */
 
 const crypto = require('crypto');
@@ -18,7 +19,109 @@ const {
   collectMilestoneRequirements,
 } = require('./core.cjs');
 
+/**
+ * Detect build and test commands for the current project.
+ *
+ * Resolution order:
+ *   1. Check bd memories for forge:codebase:commands (fast path).
+ *   2. Fall back to filesystem detection: package.json, Cargo.toml, pyproject.toml.
+ *
+ * Shared helper so verify.md consumers and other callers can reference it.
+ *
+ * @returns {{ build_cmds: string[], test_cmds: string[], config_source: string|null, has_tests: boolean }}
+ */
+function detectBuildTest() {
+  // --- Fast path: check bd memories ---
+  const memRaw = bdArgs(['memories', 'forge:codebase:commands'], { allowFail: true });
+  if (memRaw && !memRaw.includes('No memories matching')) {
+    const buildCmds = [];
+    const testCmds = [];
+    // Memory text is freeform; extract lines mentioning build/test commands.
+    const lines = memRaw.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim().toLowerCase();
+      if (/\bbuild\b/.test(trimmed)) {
+        // Extract the command portion after any colon or dash prefix
+        const cmd = line.replace(/^[\s\-*]*(?:build\s*(?:command)?[:=]\s*)?/i, '').trim();
+        if (cmd) buildCmds.push(cmd);
+      }
+      if (/\btest\b/.test(trimmed)) {
+        const cmd = line.replace(/^[\s\-*]*(?:test\s*(?:command)?[:=]\s*)?/i, '').trim();
+        if (cmd) testCmds.push(cmd);
+      }
+    }
+    if (buildCmds.length > 0 || testCmds.length > 0) {
+      return {
+        build_cmds: buildCmds,
+        test_cmds: testCmds,
+        config_source: 'bd-memory',
+        has_tests: testCmds.length > 0,
+      };
+    }
+  }
+
+  // --- Filesystem detection ---
+
+  // package.json
+  const pkgPath = path.join(process.cwd(), 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      const scripts = pkg.scripts || {};
+      const buildCmds = scripts.build ? [`npm run build`] : [];
+      const testCmds = scripts.test ? [`npm test`] : [];
+      return {
+        build_cmds: buildCmds,
+        test_cmds: testCmds,
+        config_source: 'package.json',
+        has_tests: testCmds.length > 0,
+      };
+    } catch {
+      // INTENTIONALLY SILENT: malformed package.json, fall through to next detector.
+    }
+  }
+
+  // Cargo.toml
+  const cargoPath = path.join(process.cwd(), 'Cargo.toml');
+  if (fs.existsSync(cargoPath)) {
+    return {
+      build_cmds: ['cargo build'],
+      test_cmds: ['cargo test'],
+      config_source: 'Cargo.toml',
+      has_tests: true,
+    };
+  }
+
+  // pyproject.toml
+  const pyprojectPath = path.join(process.cwd(), 'pyproject.toml');
+  if (fs.existsSync(pyprojectPath)) {
+    try {
+      const content = fs.readFileSync(pyprojectPath, 'utf8');
+      const hasPytest = /pytest/i.test(content);
+      const testCmds = hasPytest ? ['python -m pytest'] : ['python -m unittest discover'];
+      return {
+        build_cmds: [],
+        test_cmds: testCmds,
+        config_source: 'pyproject.toml',
+        has_tests: true,
+      };
+    } catch {
+      // INTENTIONALLY SILENT: malformed pyproject.toml, fall through.
+    }
+  }
+
+  // No config files found
+  return {
+    build_cmds: [],
+    test_cmds: [],
+    config_source: null,
+    has_tests: false,
+  };
+}
+
 module.exports = {
+  // Expose helper for programmatic use by verify.md consumers and other callers
+  detectBuildTest,
   /**
    * Get phase context: phase details + all tasks + their statuses.
    */
@@ -1078,5 +1181,14 @@ module.exports = {
       pitfall_flags: pitfallFlags,
       effectiveness_ratings: effectivenessRatings,
     });
+  },
+
+  /**
+   * Detect build and test commands for the current project.
+   * Returns deterministic JSON describing build/test commands.
+   */
+  'detect-build-test'(_args) {
+    const result = detectBuildTest();
+    output(result);
   },
 };
