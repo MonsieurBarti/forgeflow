@@ -33,6 +33,8 @@ const SETTINGS_DEFAULTS = {
   quality_gate: true,
   require_tests: true,
   web_ui: true,
+  shift_left_gates: true,
+  shift_left_enforcement: 'advisory',
 };
 
 const SETTINGS_DESCRIPTIONS = {
@@ -45,6 +47,15 @@ const SETTINGS_DESCRIPTIONS = {
   quality_gate: 'Run pre-PR quality pipeline (security, code review, performance audits)',
   require_tests: 'Require test suite to exist; hard-fail verify if no tests detected',
   web_ui: 'Use dev-server for interactive browser UIs in Phase 3+ workflows; when false, fall back to static HTML files and CLI prompts',
+  shift_left_gates: 'Run shift-left quality gates at plan-time and per-wave (architect, security, perf reviews)',
+  shift_left_enforcement: 'Shift-left gate mode: advisory (report findings) or enforced (halt on findings)',
+};
+
+// --- Settings Enum Constraints ---
+// Maps enum-valued settings to their allowed values.
+// Boolean settings are not listed here -- only string enums.
+const SETTINGS_ENUMS = {
+  shift_left_enforcement: ['advisory', 'enforced'],
 };
 
 // --- Model Profile Table ---
@@ -617,6 +628,7 @@ module.exports = {
   PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS,
   SETTINGS_DESCRIPTIONS,
+  SETTINGS_ENUMS,
   MODEL_PROFILES,
   ROLE_TO_AGENT,
   DEFAULT_MODEL_PROFILE,

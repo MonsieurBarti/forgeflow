@@ -19,7 +19,7 @@ const {
   bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
   collectMilestoneRequirements,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
-  SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
+  SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS, SETTINGS_ENUMS,
   MODEL_PROFILES, ROLE_TO_AGENT,
   parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
   resolveAgentModel, loadModelProfile, loadModelOverrides,
@@ -2825,6 +2825,14 @@ module.exports = {
 
     const parsedValue = coerceBool(value);
 
+    // Validate enum-constrained settings
+    if (!isNested && SETTINGS_ENUMS[topKey]) {
+      const allowed = SETTINGS_ENUMS[topKey];
+      if (!allowed.includes(parsedValue)) {
+        forgeError('INVALID_INPUT', `Invalid value "${parsedValue}" for setting "${topKey}"`, `Allowed values: ${allowed.join(', ')}`, { key: topKey, value: parsedValue, allowed });
+      }
+    }
+
     if (scope === 'global' || scope === 'project') {
       const filePath = scope === 'global' ? GLOBAL_SETTINGS_PATH : path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       mutateSettingsFile(scope, filePath, (existing) => { setNestedKey(existing, topKey, subKey, parsedValue); });
@@ -2883,6 +2891,13 @@ module.exports = {
         for (const [key, value] of Object.entries(updates)) {
           if (!(key in SETTINGS_DEFAULTS)) continue;
           const parsedValue = coerceBool(value);
+          // Validate enum-constrained settings
+          if (SETTINGS_ENUMS[key]) {
+            const allowed = SETTINGS_ENUMS[key];
+            if (!allowed.includes(parsedValue)) {
+              forgeError('INVALID_INPUT', `Invalid value "${parsedValue}" for setting "${key}"`, `Allowed values: ${allowed.join(', ')}`, { key, value: parsedValue, allowed });
+            }
+          }
           existing[key] = parsedValue;
           results.push({ key, value: parsedValue });
         }
