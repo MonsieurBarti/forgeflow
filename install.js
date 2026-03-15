@@ -182,6 +182,9 @@ function collectFiles(dir) {
 /**
  * Computes SHA-256 hash of a file's contents.
  */
+// INTENTIONAL: readFileSync + SHA-256 per file is called in install-time loops.
+// This runs exactly once during installation (~50 files typical). The synchronous
+// overhead is negligible and keeps the install script simple and dependency-free.
 function hashFile(filePath) {
   const content = fs.readFileSync(filePath);
   return crypto.createHash('sha256').update(content).digest('hex');
