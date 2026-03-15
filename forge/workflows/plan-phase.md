@@ -335,6 +335,11 @@ Resolve the model:
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-plan-checker --raw)
 ```
 
+Gather project context for the checker:
+```bash
+SLIM=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
+```
+
 Spawn a **forge-plan-checker** agent:
 
 ```
@@ -343,6 +348,7 @@ Verify the plan for this phase:
 
 Phase ID: <phase-id>
 Project ID: <project-id>
+Project context: <SLIM output>
 
 Check:
 1. Every task has specific, testable acceptance criteria
