@@ -60,6 +60,9 @@ const MODEL_PROFILES = {
   'forge-security-auditor':  { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'forge-code-reviewer':     { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
   'forge-performance-auditor':{ quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-security-fixer':     { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-code-fixer':         { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
+  'forge-perf-fixer':         { quality: 'sonnet', balanced: 'sonnet', budget: 'haiku' },
 };
 
 // Map old role names to new agent names for backwards compatibility
@@ -75,6 +78,9 @@ const ROLE_TO_AGENT = {
   security_auditor: 'forge-security-auditor',
   code_reviewer: 'forge-code-reviewer',
   performance_auditor: 'forge-performance-auditor',
+  security_fixer: 'forge-security-fixer',
+  code_fixer: 'forge-code-fixer',
+  perf_fixer: 'forge-perf-fixer',
 };
 
 const DEFAULT_MODEL_PROFILE = 'balanced';

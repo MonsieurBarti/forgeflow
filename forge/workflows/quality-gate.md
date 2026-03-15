@@ -1,8 +1,9 @@
 <purpose>
 Pre-PR quality pipeline. Orchestrates three audit agents (security, code review, performance)
 in parallel, collects their structured JSON findings, groups results by severity, presents them
-to the user for approval, creates fix tasks for approved findings, and spawns a fixer agent to
-batch-apply all approved fixes. Capped at 1 round of fixes -- no recursive re-audit.
+to the user for approval, creates fix tasks for approved findings, and dispatches approved fixes
+to domain-specific fixer agents (security-fixer, code-fixer, perf-fixer) in parallel.
+Capped at 1 round of fixes -- no recursive re-audit.
 </purpose>
 
 <process>
@@ -156,11 +157,42 @@ warning listing which agents failed:
 
 **If all three agents succeeded**: Proceed normally with no warning.
 
-## 6. Merge and Group Findings by Severity
+## 6. Load and Filter Known False-Positives
 
-Collect all findings from successful agents into a single list. Each finding retains its
-`agent` origin from the parent response's `agent` field (add it to each finding if not
-already present).
+Before merging findings, load the known false-positive list and filter them out.
+
+```bash
+FP_JSON=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-fp-list)
+```
+
+Parse the `false_positives` array from the response. For each finding from all successful
+agents, compute its FP hash (SHA-256 of agent+category+file+title, truncated to 16 hex chars)
+and check if it matches any known FP hash. Remove matching findings from the results.
+
+### FP hash computation pseudocode
+
+```
+function computeFpHash(agent, category, file, title):
+  input = agent + category + file + title
+  return sha256(input).hex().slice(0, 16)
+```
+
+If any findings were filtered, report the count:
+
+```
+------------------------------------------------------------
+ Known false-positives filtered: <N>
+------------------------------------------------------------
+```
+
+Retain the filtered findings list for subsequent steps. The original total before filtering
+should be noted for the final summary.
+
+## 7. Merge and Group Findings by Severity
+
+Collect all findings from successful agents into a single list (after FP filtering from
+step 6). Each finding retains its `agent` origin from the parent response's `agent` field
+(add it to each finding if not already present).
 
 Group findings into two severity tiers:
 
@@ -181,7 +213,7 @@ Proceed with your PR.
 ------------------------------------------------------------
 ```
 
-## 7. Present Blockers for Approval
+## 8. Present Blockers for Approval
 
 If there are blocker findings (critical/high), present them first.
 
@@ -202,7 +234,7 @@ BLOCKERS (critical/high severity) -- these should be fixed before merging:
 ```
 
 Use AskUserQuestion with `multiSelect:true` to let the user select which blocker findings
-to fix. Options should be the numbered findings plus "Fix all blockers" and "Skip all blockers":
+to fix. Options should include "Mark as false-positive" alongside the existing options:
 
 ```
 AskUserQuestion(
@@ -213,6 +245,7 @@ AskUserQuestion(
     "1. [CRITICAL] Hardcoded database password in source",
     "2. [HIGH] Function exceeds 80 lines with deep nesting",
     ...
+    "Mark selected as false-positive",
     "Skip all blockers"
   ]
 )
@@ -222,7 +255,18 @@ Record the user's selections. If "Fix all blockers" is selected, mark all blocke
 as approved. If "Skip all blockers" is selected, mark none. Otherwise, mark only the
 individually selected findings.
 
-## 8. Present Advisory Findings for Approval
+If "Mark selected as false-positive" is selected, persist each individually selected finding
+as a false-positive so it is filtered out in future runs:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-fp-add \
+  --agent=<agent> --category=<category> --file=<file> --title=<title>
+```
+
+Findings marked as false-positive are NOT approved for fixing -- they are simply excluded
+from future runs.
+
+## 9. Present Advisory Findings for Approval
 
 If there are advisory findings (medium/low/info), present them next.
 
@@ -253,14 +297,25 @@ AskUserQuestion(
     "1. [MEDIUM] Potential N+1 query in user loader loop",
     "2. [LOW] Component could benefit from React.memo",
     ...
+    "Mark selected as false-positive",
     "Skip all advisory"
   ]
 )
 ```
 
-Record the user's selections using the same logic as step 7.
+Record the user's selections using the same logic as step 8.
 
-## 9. Create Fix Tasks and Spawn Fixer Agent
+If "Mark selected as false-positive" is selected, persist each individually selected finding
+as a false-positive for future runs:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-fp-add \
+  --agent=<agent> --category=<category> --file=<file> --title=<title>
+```
+
+Findings marked as false-positive are NOT approved for fixing.
+
+## 10. Create Fix Tasks and Spawn Fixer Agent
 
 Combine all approved findings from both the blocker and advisory groups.
 
@@ -278,7 +333,7 @@ Proceed with your PR when ready.
 
 If findings were approved, proceed:
 
-### 9a. Create Fix Task Beads
+### 10a. Create Fix Task Beads
 
 For each approved finding, create a task bead:
 
@@ -290,36 +345,56 @@ bd create --title="Fix: <finding title>" \
 
 Collect all created task IDs.
 
-### 9b. Spawn Fixer Agent
+### 10b. Batch Findings by Agent Origin and Spawn Domain-Specific Fixers
 
-Spawn a single fixer agent to batch-apply all approved fixes in one pass. Do NOT spawn
-one agent per finding -- batch them all into a single prompt.
+Group approved findings by their originating audit agent and map each group to the
+corresponding fixer agent:
 
-Build a numbered list of all approved findings with their full details (file, line, description,
-remediation). Pass this to a forge-executor agent:
+| Originating agent      | Fixer agent            |
+|------------------------|------------------------|
+| security-auditor       | forge-security-fixer   |
+| code-reviewer          | forge-code-fixer       |
+| performance-auditor    | forge-perf-fixer       |
 
+Only spawn a fixer for groups that have at least one approved finding. If a group has
+zero findings, skip that fixer entirely. Spawn up to 3 fixer agents in parallel using
+multiple Agent tool calls in the same response.
+
+Resolve models for each fixer agent before spawning:
+
+```bash
+MODEL_SEC_FIXER=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-security-fixer --raw)
+MODEL_CODE_FIXER=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-code-fixer --raw)
+MODEL_PERF_FIXER=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-perf-fixer --raw)
 ```
-Agent(subagent_type="forge-executor", prompt="
-Apply the following quality-gate fixes. Each fix is an approved finding from audit agents.
+
+For each non-empty batch, spawn the corresponding fixer with only its domain-specific
+findings. Each fixer receives only the findings relevant to its domain, not all findings.
+
+**Security Fixer** (if security findings exist):
+```
+Agent(subagent_type="forge-security-fixer", model="<MODEL_SEC_FIXER or omit>", prompt="
+Apply the following approved security fixes. Each fix was identified by the security-auditor.
 Apply all fixes in a single pass, then create one atomic commit.
 
 Fixes to apply:
 
-<for each approved finding>
+<for each approved security finding>
 ## Fix <N>: <title>
 - File: <file>:<line>
 - Severity: <severity>
-- Category: <category> (from <agent>)
+- Category: <category>
 - Description: <description>
 - Remediation: <remediation>
+- Task ID: <task-id>
 </for each>
 
 Instructions:
 1. Read each file that needs fixing
-2. Apply the remediation for each finding
+2. Apply the security remediation for each finding
 3. Run any relevant tests to verify fixes don't break anything
 4. Create a single atomic git commit:
-   Message: fix(quality-gate): apply <N> approved fixes from audit
+   Message: fix(quality-gate): apply <N> security fixes from audit
    Use git add <specific files> -- never git add . or git add -A
    NEVER run git merge or gh pr merge
 5. For each fix task, close it:
@@ -332,9 +407,81 @@ If a fix cannot be applied cleanly (e.g., conflicting changes, unclear remediati
 ")
 ```
 
-## 10. Cap at 1 Round -- No Recursive Re-Audit
+**Code Fixer** (if code review findings exist):
+```
+Agent(subagent_type="forge-code-fixer", model="<MODEL_CODE_FIXER or omit>", prompt="
+Apply the following approved code quality fixes. Each fix was identified by the code-reviewer.
+Apply all fixes in a single pass, then create one atomic commit.
 
-**IMPORTANT**: After the fixer agent completes, do NOT re-run the audit agents. The quality
+Fixes to apply:
+
+<for each approved code review finding>
+## Fix <N>: <title>
+- File: <file>:<line>
+- Severity: <severity>
+- Category: <category>
+- Description: <description>
+- Remediation: <remediation>
+- Task ID: <task-id>
+</for each>
+
+Instructions:
+1. Read each file that needs fixing
+2. Apply the refactoring for each finding
+3. Run any relevant tests to verify fixes don't break anything
+4. Create a single atomic git commit:
+   Message: refactor(quality-gate): apply <N> code quality fixes from review
+   Use git add <specific files> -- never git add . or git add -A
+   NEVER run git merge or gh pr merge
+5. For each fix task, close it:
+   bd close <task-id> --reason='Applied fix: <finding title>'
+
+If a fix cannot be applied cleanly (e.g., conflicting changes, unclear remediation):
+- Skip that fix
+- Add a note to the task: bd update <task-id> --notes='Could not auto-fix: <reason>'
+- Continue with remaining fixes
+")
+```
+
+**Performance Fixer** (if performance findings exist):
+```
+Agent(subagent_type="forge-perf-fixer", model="<MODEL_PERF_FIXER or omit>", prompt="
+Apply the following approved performance fixes. Each fix was identified by the performance-auditor.
+Apply all fixes in a single pass, then create one atomic commit.
+
+Fixes to apply:
+
+<for each approved performance finding>
+## Fix <N>: <title>
+- File: <file>:<line>
+- Severity: <severity>
+- Category: <category>
+- Description: <description>
+- Remediation: <remediation>
+- Task ID: <task-id>
+</for each>
+
+Instructions:
+1. Read each file that needs fixing
+2. Apply the performance optimization for each finding
+3. Run any relevant tests to verify fixes don't break anything
+4. Create a single atomic git commit:
+   Message: perf(quality-gate): apply <N> performance fixes from audit
+   Use git add <specific files> -- never git add . or git add -A
+   NEVER run git merge or gh pr merge
+5. For each fix task, close it:
+   bd close <task-id> --reason='Applied fix: <finding title>'
+
+If a fix cannot be applied cleanly (e.g., conflicting changes, unclear remediation):
+- Skip that fix
+- Add a note to the task: bd update <task-id> --notes='Could not auto-fix: <reason>'
+- Continue with remaining fixes
+")
+```
+
+## 11. Cap at 1 Round -- No Recursive Re-Audit
+
+**IMPORTANT**: After the fixer agents complete, do NOT re-run the audit agents. The quality
 gate is capped at exactly 1 round of fixes. This prevents infinite audit-fix loops and keeps
 the workflow predictable.
 
@@ -345,7 +492,8 @@ Report the final summary:
  Quality Gate: Complete
 ------------------------------------------------------------
 Audit agents run:     <N successful> / 3
-Total findings:       <N>
+Total findings:       <N total before FP filtering>
+  False-positives filtered: <N>
   Blockers (crit/high): <N>
   Advisory (med/low/info): <N>
 Approved for fixing:  <N>
