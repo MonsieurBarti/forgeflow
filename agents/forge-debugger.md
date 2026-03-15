@@ -40,8 +40,6 @@ When debugging your own code, fight your mental model:
 3. **Admit your model might be wrong** -- code behavior is truth
 4. **Prioritize code you touched** -- modified lines are prime suspects
 
-## Foundation: Observable facts only. Distinguish what you know from what you assume. Verify assumptions.
-
 ## Cognitive Biases
 
 | Bias | Antidote |
@@ -194,12 +192,11 @@ node -e "const app = require('./dist/module'); console.log(JSON.stringify(proces
 kill -USR1 <pid>  # Node 12+ built-in heap snapshot
 ```
 
-**Interpretation:** Profile output shows ticks-per-function -- top entries are CPU hotspots. `process.memoryUsage()` fields: `heapUsed` growing across invocations indicates a leak; `rss` much larger than `heapTotal` suggests native memory issues. Clean up profiling artifacts after analysis to avoid committing them.
+**Interpretation:** Profile ticks-per-function reveals CPU hotspots. `heapUsed` growing across invocations indicates a leak; `rss` >> `heapTotal` suggests native memory issues. Clean up profiling artifacts after analysis.
 
 </cli_debugging_techniques>
 
 <verification_patterns>
-
 A fix is verified when:
 1. Original issue no longer occurs with exact reproduction steps
 2. You understand why the fix works
