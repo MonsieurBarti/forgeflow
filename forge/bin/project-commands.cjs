@@ -2008,7 +2008,8 @@ module.exports = {
       try {
         const globalText = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
         const globalSettings = parseFrontmatter(globalText);
-        const unknownKeys = Object.keys(globalSettings).filter(k => !(k in SETTINGS_DEFAULTS));
+        const EXTRA_KNOWN_KEYS = new Set(['models', 'model_profile']);
+        const unknownKeys = Object.keys(globalSettings).filter(k => !(k in SETTINGS_DEFAULTS) && !EXTRA_KNOWN_KEYS.has(k));
         globalSettingsOk = unknownKeys.length === 0;
         globalSettingsMessage = globalSettingsOk
           ? `Global settings valid (${Object.keys(globalSettings).length} keys)`
