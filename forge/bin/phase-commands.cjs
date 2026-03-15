@@ -794,9 +794,22 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid phase number: ${afterPhaseArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
-    const children = bdJsonArgs(['children', projectId]);
-    const issues = normalizeChildren(children);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    // --- Find phases: try direct children of project first, then search milestone children ---
+    let phases = [];
+    const directChildren = bdJsonArgs(['children', projectId]);
+    const directIssues = normalizeChildren(directChildren);
+    phases = directIssues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    if (phases.length === 0) {
+      // No phases directly under project -- search milestones
+      const milestones = directIssues.filter(i => (i.labels || []).includes('forge:milestone'));
+      for (const ms of milestones) {
+        const msChildren = bdJsonArgs(['children', ms.id]);
+        const msIssues = normalizeChildren(msChildren);
+        const msPhases = msIssues.filter(i => (i.labels || []).includes('forge:phase'));
+        phases = phases.concat(msPhases);
+      }
+    }
 
     let targetPhase = null;
     for (const phase of phases) {
@@ -809,6 +822,29 @@ module.exports = {
 
     if (!targetPhase) {
       forgeError('NOT_FOUND', `Phase ${afterPhaseNum} not found in project`, 'List available phases with: forge-tools list-phases <project-id>', { projectId, phaseNumber: afterPhaseNum });
+    }
+
+    // --- Auto-detect parent milestone by walking parent-child deps from afterPhase ---
+    // direction=down returns the bead's own parent-child dependencies (i.e. its parent).
+    let parentId = projectId; // fallback: wire to project if no milestone found
+    const parentDeps = bdJsonArgs(['dep', 'list', targetPhase.id, '--direction=down', '--type=parent-child']);
+    if (Array.isArray(parentDeps)) {
+      for (const dep of parentDeps) {
+        const ancestorId = dep.id;
+        if (!ancestorId) continue;
+        const ancestor = bdJsonArgs(['show', ancestorId]);
+        if (ancestor && (ancestor.labels || []).includes('forge:milestone')) {
+          parentId = ancestorId;
+          break;
+        }
+      }
+    }
+
+    // Re-query phases from the detected parent for accurate sibling enumeration
+    if (parentId !== projectId) {
+      const parentChildren = bdJsonArgs(['children', parentId]);
+      const parentIssues = normalizeChildren(parentChildren);
+      phases = parentIssues.filter(i => (i.labels || []).includes('forge:phase'));
     }
 
     let maxDecimal = 0;
@@ -835,7 +871,7 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bdArgs(['dep', 'add', created.id, projectId, '--type=parent-child']);
+    bdArgs(['dep', 'add', created.id, parentId, '--type=parent-child']);
     bdArgs(['label', 'add', created.id, 'forge:phase']);
     bdArgs(['dep', 'add', created.id, targetPhase.id]);
 
@@ -862,6 +898,7 @@ module.exports = {
       title,
       description,
       project_id: projectId,
+      milestone_id: parentId !== projectId ? parentId : null,
       rewired_next: nextPhase ? { id: nextPhase.id, title: nextPhase.title } : null,
     });
   },
