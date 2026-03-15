@@ -202,7 +202,56 @@ Group findings into two severity tiers:
 Sort each group by severity (critical before high; medium before low before info), then
 by agent name, then by file path.
 
-If both groups are empty (no findings from any agent), report a clean bill of health and stop:
+If both groups are empty (no findings from any agent), note the clean result but **continue
+to step 8** to generate the PASSED report.
+
+## 8. Generate Findings Report
+
+Generate a comprehensive HTML report of all findings, regardless of whether there are findings
+or not. This runs BEFORE the interactive approval steps so the user can view the visual report
+while making approval decisions.
+
+Assemble the report data payload from the current workflow state:
+
+```
+REPORT_DATA = {
+  agents: [
+    { name: "<agent-name>", status: "success" | "failed", findingsCount: <N> }
+    // one entry per audit agent (including failed ones)
+  ],
+  findings: [
+    // all findings after FP filtering from step 6, each with its `agent` field
+  ],
+  filteredFps: [
+    // findings removed in step 6, each: { hash, agent, category, file, title }
+  ],
+  changedFiles: [
+    // file list from step 1
+  ],
+  summary: {
+    totalBeforeFilter: <count before step 6 filtering>,
+    totalAfterFilter: <count after step 6 filtering>,
+    blockers: <critical + high count>,
+    advisory: <medium + low + info count>,
+    agentsRun: <successful agent count>,
+    agentsFailed: <failed agent count>
+  }
+}
+```
+
+Call the report command:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-report --data='<REPORT_DATA as JSON>'
+```
+
+**Important:**
+- Report generation failure MUST NOT abort the pipeline. If the command fails, log a warning
+  and continue to step 9. Use allowFail or wrap in try/catch.
+- This step runs even for zero-finding cases — the PASSED report is still generated.
+- The report is ephemeral: it auto-opens in the browser and the file is deleted after 5 seconds.
+
+If findings are empty (zero-finding clean run), report a clean bill of health and stop
+(no approval steps needed):
 
 ```
 ------------------------------------------------------------
@@ -213,7 +262,7 @@ Proceed with your PR.
 ------------------------------------------------------------
 ```
 
-## 8. Present Blockers for Approval
+## 9. Present Blockers for Approval
 
 If there are blocker findings (critical/high), present them first.
 
@@ -266,7 +315,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-fp-add \
 Findings marked as false-positive are NOT approved for fixing -- they are simply excluded
 from future runs.
 
-## 9. Present Advisory Findings for Approval
+## 10. Present Advisory Findings for Approval
 
 If there are advisory findings (medium/low/info), present them next.
 
@@ -303,7 +352,7 @@ AskUserQuestion(
 )
 ```
 
-Record the user's selections using the same logic as step 8.
+Record the user's selections using the same logic as step 9.
 
 If "Mark selected as false-positive" is selected, persist each individually selected finding
 as a false-positive for future runs:
@@ -315,7 +364,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-fp-add \
 
 Findings marked as false-positive are NOT approved for fixing.
 
-## 10. Create Fix Tasks and Spawn Fixer Agent
+## 11. Create Fix Tasks and Spawn Fixer Agent
 
 Combine all approved findings from both the blocker and advisory groups.
 
@@ -333,7 +382,7 @@ Proceed with your PR when ready.
 
 If findings were approved, proceed:
 
-### 10a. Create Fix Task Beads
+### 11a. Create Fix Task Beads
 
 For each approved finding, create a task bead:
 
@@ -345,7 +394,7 @@ bd create --title="Fix: <finding title>" \
 
 Collect all created task IDs.
 
-### 10b. Batch Findings by Agent Origin and Spawn Domain-Specific Fixers
+### 11b. Batch Findings by Agent Origin and Spawn Domain-Specific Fixers
 
 Group approved findings by their originating audit agent and map each group to the
 corresponding fixer agent:
@@ -479,7 +528,7 @@ If a fix cannot be applied cleanly (e.g., conflicting changes, unclear remediati
 ")
 ```
 
-## 11. Cap at 1 Round -- No Recursive Re-Audit
+## 12. Cap at 1 Round -- No Recursive Re-Audit
 
 **IMPORTANT**: After the fixer agents complete, do NOT re-run the audit agents. The quality
 gate is capped at exactly 1 round of fixes. This prevents infinite audit-fix loops and keeps
