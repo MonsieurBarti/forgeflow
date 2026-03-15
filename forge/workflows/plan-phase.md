@@ -236,8 +236,16 @@ If any task in this phase also contributes to a sibling phase's requirement, wir
 dependency to it. This provides cross-phase traceability.
 </end sibling reqs section>
 
-For each task:
-1. Create the task bead with acceptance_criteria
+For each task, determine:
+- files_affected: list of file paths that will be created or modified
+- approach: 1-2 sentence implementation summary
+- complexity: simple | medium | complex
+
+Then create the task:
+1. Create the task bead with acceptance_criteria and --design containing JSON:
+   bd create --title=\"<title>\" --description=\"<what>\" --acceptance=\"<criteria>\" \
+     --design='{\"files_affected\":[\"path/to/file.ts\"],\"approach\":\"<summary>\",\"complexity\":\"<simple|medium|complex>\"}' \
+     --type=task --priority=2 --json
 2. Add parent-child dep to the phase
 3. Add forge:task label
 4. Add validates dep to requirements it fulfills
@@ -249,7 +257,8 @@ If creating tasks directly (small phase, clear scope):
 ```bash
 bd create --title="<task title>" \
   --description="<what to implement>" \
-  --acceptance_criteria="<specific, testable criteria>" \
+  --acceptance="<specific, testable criteria>" \
+  --design='{"files_affected":["path/to/file.ts"],"approach":"<1-2 sentence summary>","complexity":"<simple|medium|complex>"}' \
   --type=task --priority=2 --json
 bd dep add <task-id> <phase-id> --type=parent-child
 bd label add <task-id> forge:task
