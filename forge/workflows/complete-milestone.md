@@ -186,6 +186,71 @@ If the worktree no longer exists (already removed or was never created), treat t
 
 **IMPORTANT: NEVER close the project bead.** The project stays open permanently — it represents the repository itself. Only milestones are closed.
 
+## 7c. Cleanup Preview (dry-run)
+
+Collect what would be cleaned by running each cleanup command in dry-run mode:
+
+```bash
+BRANCH_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-cleanup-branches <milestone-id> --dry-run)
+BEAD_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-close-beads <milestone-id> --dry-run)
+MEMORY_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-purge-memories <milestone-id> --dry-run)
+```
+
+Parse JSON from each. Display a formatted preview:
+
+```
+## Cleanup Preview
+
+Branches to delete: <N>
+<list branch names, or "none">
+
+Beads to close: <N>
+<list id + title, or "none">
+
+Memories to purge: <N>
+<list key names, or "none">
+```
+
+**If all three return count: 0:** Skip steps 7d-7e. Note "Cleanup: nothing to do" and proceed to step 8.
+
+## 7d. User Confirmation
+
+Use AskUserQuestion (multiSelect: false):
+- header: "Cleanup"
+- question: "Proceed with milestone cleanup?"
+- options:
+  - "Execute all cleanup" — proceed with all three cleanup steps
+  - "Skip cleanup" — skip directly to step 8
+  - "Cancel" — stop the workflow entirely
+
+If "Cancel": stop the workflow.
+If "Skip cleanup": proceed to step 8 with cleanup_skipped = true.
+
+## 7e. Execute Cleanup
+
+Call each command without --dry-run, in order (branches first since worktree was already removed in 7b):
+
+```bash
+BRANCH_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-cleanup-branches <milestone-id>)
+BEAD_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-close-beads <milestone-id>)
+MEMORY_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-purge-memories <milestone-id>)
+```
+
+Each command is failure-tolerant internally (allowFail per item). Parse the JSON results.
+
+## 7f. Cleanup Report
+
+Append cleanup results to the step 8 report:
+
+```
+## Cleanup Results
+- Branches deleted: <N> (failed: <M>)
+- Beads closed: <N> (failed: <M>)
+- Memories purged: <N> (failed: <M>)
+```
+
+If any failures, list them so the user can investigate.
+
 ## 8. Report and Next Steps
 
 ```
@@ -197,6 +262,8 @@ Phases: <N> completed
 Requirements: <M/Y> satisfied
 <known gaps summary if any>
 
+<if cleanup was executed, include cleanup results from step 7f>
+
 Retrospective stored in milestone bead (<milestone-id>).
 
 ---
@@ -204,7 +271,6 @@ Retrospective stored in milestone bead (<milestone-id>).
 Next steps:
 - /forge:new-milestone -- start next milestone cycle
 - /forge:progress -- see updated project status
-- /forge:cleanup -- clean up stale beads from completed work
 ```
 
 </process>
@@ -218,5 +284,8 @@ Next steps:
 - [ ] Retrospective generated and stored in milestone bead notes
 - [ ] Milestone epic closed
 - [ ] Worktree removed via worktree-remove
+- [ ] Cleanup preview shown (branches, beads, memories)
+- [ ] User confirmed cleanup execution (or skipped)
+- [ ] Cleanup executed (branches deleted, beads closed, memories purged)
 - [ ] Next steps presented to user
 </success_criteria>
