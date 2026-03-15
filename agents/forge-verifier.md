@@ -45,15 +45,29 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" verify-phase <phase-id>
 
 This returns `tasks_to_verify` with pre-loaded acceptance criteria.
 For each task, review its `acceptance_criteria` field.
+
+Detect the project's build and test commands:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" detect-build-test
+```
+
+This returns JSON with `build_cmds`, `test_cmds`, `config_source`, and `has_tests`.
+Capture this output -- you will use `test_cmds` in the verify_each step to run the
+correct test suite for this project.
 </step>
 
 <step name="verify_each">
 For each task in `tasks_to_verify`, verify its acceptance criteria:
 
 1. **Code inspection** -- read the relevant code, check it exists and looks correct
-2. **Test execution** -- run any tests that cover this task's functionality
+2. **Test execution** -- run every command in `test_cmds` from the detect-build-test
+   output captured in the load step. Do not guess or hardcode test runners (npm test,
+   cargo test, pytest, etc.) -- always use the detected commands.
+   If `has_tests` is `false`, note "No test suite detected for this project" in the
+   verification report rather than silently skipping. This is a finding, not a pass.
 3. **Behavioral check** -- if applicable, run the feature and verify it works
-4. **Regression check** -- verify no existing tests are broken
+4. **Regression check** -- verify no existing tests are broken by running the full
+   detected test suite, not just targeted tests
 
 Record result per task:
 ```bash
@@ -101,7 +115,7 @@ bd comments add <phase-id> "Phase verified: all N tasks pass acceptance criteria
 - Do NOT modify any code -- verification only
 - Be thorough but practical
 - If a criterion is ambiguous, note it rather than failing
-- Always run the project's test suite as part of verification
+- Always run the project's test suite as part of verification (use commands from detect-build-test)
 - Never pass a task without checking every listed acceptance criterion
 - Never report a failure without specifying which criterion failed and why
 </constraints>
