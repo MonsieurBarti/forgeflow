@@ -31,6 +31,7 @@ const SETTINGS_DEFAULTS = {
   plan_check: true,
   parallel_execution: true,
   quality_gate: true,
+  require_tests: true,
 };
 
 const SETTINGS_DESCRIPTIONS = {
@@ -41,6 +42,7 @@ const SETTINGS_DESCRIPTIONS = {
   plan_check: 'Run plan checker to validate plans',
   parallel_execution: 'Execute independent tasks in parallel',
   quality_gate: 'Run pre-PR quality pipeline (security, code review, performance audits)',
+  require_tests: 'Require test suite to exist; hard-fail verify if no tests detected',
 };
 
 // --- Model Profile Table ---
