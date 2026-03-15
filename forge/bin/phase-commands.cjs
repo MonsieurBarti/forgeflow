@@ -32,6 +32,15 @@ const {
  */
 // Allowlist of safe command prefixes for memory-sourced commands
 const SAFE_CMD_PREFIXES = /^(npm|npx|yarn|pnpm|cargo|python|python3|pytest|make|go|bun|deno|ruby|bundle|rake|mvn|gradle|dotnet)\b/;
+// Reject commands containing shell metacharacters even when prefix passes allowlist
+const SHELL_METACHAR_RE = /[;|&$`<>]/;
+
+// Allowlist for checkpoint fields -- shared between checkpoint-save and checkpoint-load
+// to prevent arbitrary external data from being written or output.
+const CHECKPOINT_ALLOWLIST = [
+  'phaseId', 'phase_id', 'completedWaves', 'currentWave', 'taskStatuses',
+  'preExistingClosed', 'branchName', 'baseCommitSha', 'timestamp', 'completed',
+];
 
 function detectBuildTest() {
   const root = findGitRoot(process.cwd()) || process.cwd();
@@ -47,11 +56,11 @@ function detectBuildTest() {
       const trimmed = line.trim().toLowerCase();
       if (/\bbuild\b/.test(trimmed)) {
         const cmd = line.replace(/^[\s\-*]*(?:build\s*(?:command)?[:=]\s*)?/i, '').trim();
-        if (cmd && SAFE_CMD_PREFIXES.test(cmd)) buildCmds.push(cmd);
+        if (cmd && SAFE_CMD_PREFIXES.test(cmd) && !SHELL_METACHAR_RE.test(cmd)) buildCmds.push(cmd);
       }
       if (/\btest\b/.test(trimmed)) {
         const cmd = line.replace(/^[\s\-*]*(?:test\s*(?:command)?[:=]\s*)?/i, '').trim();
-        if (cmd && SAFE_CMD_PREFIXES.test(cmd)) testCmds.push(cmd);
+        if (cmd && SAFE_CMD_PREFIXES.test(cmd) && !SHELL_METACHAR_RE.test(cmd)) testCmds.push(cmd);
       }
     }
     if (buildCmds.length > 0 || testCmds.length > 0) {
@@ -498,12 +507,8 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid checkpoint JSON: ${err.message}`, 'Provide valid JSON as the second argument');
     }
 
-    // Allowlist: only spread known-safe checkpoint fields to prevent
+    // Filter against CHECKPOINT_ALLOWLIST (module-level) to prevent
     // arbitrary external data from being written to bead notes.
-    const CHECKPOINT_ALLOWLIST = [
-      'phaseId', 'phase_id', 'completedWaves', 'currentWave', 'taskStatuses',
-      'preExistingClosed', 'branchName', 'baseCommitSha', 'timestamp', 'completed',
-    ];
     const checkpoint = {};
     for (const key of CHECKPOINT_ALLOWLIST) {
       if (parsed[key] !== undefined) checkpoint[key] = parsed[key];
@@ -570,7 +575,14 @@ module.exports = {
       return;
     }
 
-    output(checkpoint);
+    // Filter loaded checkpoint against allowlist to strip any unexpected keys
+    // that may have been injected via bead notes or bd memories.
+    const safe = {};
+    for (const key of CHECKPOINT_ALLOWLIST) {
+      if (checkpoint[key] !== undefined) safe[key] = checkpoint[key];
+    }
+
+    output(safe);
   },
 
   /**
@@ -1023,6 +1035,9 @@ module.exports = {
     if (!ctx.agent || !ctx.status) {
       forgeError('INVALID_INPUT', 'Missing required fields: agent and status', 'JSON must include "agent" and "status" fields, e.g. {"agent":"forge-executor","status":"completed"}');
     }
+    if (ctx.agent.length > 128 || ctx.status.length > 128) {
+      forgeError('INVALID_INPUT', 'Fields "agent" and "status" must not exceed 128 characters', 'Shorten the agent or status value to 128 characters or fewer');
+    }
 
     const schema = {
       agent: ctx.agent,
@@ -1222,8 +1237,13 @@ module.exports = {
         // graceful degradation to defaults is the expected behavior.
         try { design = JSON.parse(design); } catch { design = null; }
       }
+      // Normalize file paths: reject absolute paths and path traversal sequences.
+      const rawPaths = (design && Array.isArray(design.files_affected)) ? design.files_affected : [];
+      const safePaths = rawPaths
+        .map(p => path.normalize(String(p)))
+        .filter(p => !path.isAbsolute(p) && !p.startsWith('..'));
       taskDesigns[task.id] = {
-        files_affected: (design && Array.isArray(design.files_affected)) ? design.files_affected : [],
+        files_affected: safePaths,
         approach: (design && design.approach) ? String(design.approach) : 'No approach specified',
         complexity: (design && design.complexity) ? String(design.complexity) : null,
       };
