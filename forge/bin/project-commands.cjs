@@ -17,6 +17,7 @@ const path = require('path');
 const os = require('os');
 const {
   bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
+  collectMilestoneRequirements,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -317,8 +318,10 @@ function resolveProject() {
 
 /**
  * Collect all phases and requirements for a project, traversing milestones.
- * Hierarchy: Project > Milestone > Phases/Requirements
+ * Hierarchy: Project > Milestone > Phase > Requirement (3-level)
  * Also picks up any phases/reqs still directly under the project (legacy).
+ * Legacy fallback: reqs found as direct milestone children are also included
+ * for backward compatibility with closed milestones.
  *
  * Returns:
  *   - milestones: raw milestone beads (for backward compat)
@@ -349,17 +352,30 @@ function collectProjectIssues(projectId) {
   // Quick tasks (direct children of project with forge:quick label)
   const quickTasks = [];
 
-  // Collect from milestones (correct hierarchy) with per-milestone grouping
+  // Collect from milestones (3-level: milestone -> phase -> req) with per-milestone grouping
   for (const ms of milestones) {
     const msIssues = normalizeChildren(bdJson(`children ${ms.id}`));
 
     const msPhases = [];
     const msReqs = [];
+
     for (const i of msIssues) {
       if (seenIds.has(i.id)) continue;
       seenIds.add(i.id);
       const kind = classifyIssue(i);
-      if (kind === 'phase') { phases.push(i); msPhases.push(i); }
+      if (kind === 'phase') {
+        phases.push(i); msPhases.push(i);
+        // Traverse phase children to find forge:req beads (3-level hierarchy)
+        const phaseChildren = normalizeChildren(bdJson(`children ${i.id}`));
+        for (const pc of phaseChildren) {
+          if (seenIds.has(pc.id)) continue;
+          seenIds.add(pc.id);
+          if (classifyIssue(pc) === 'req') {
+            requirements.push(pc); msReqs.push(pc);
+          }
+        }
+      }
+      // Legacy fallback: reqs found as direct milestone children (old data)
       else if (kind === 'req') { requirements.push(i); msReqs.push(i); }
     }
 
@@ -2737,7 +2753,7 @@ module.exports = {
     const result = milestones.map(m => {
       const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
-      const reqs = mIssues.filter(i => (i.labels || []).includes('forge:req'));
+      const reqs = collectMilestoneRequirements(m.id);
 
       const closedPhases = phases.filter(p => p.status === 'closed');
       const closedReqs = reqs.filter(r => r.status === 'closed');
@@ -2782,7 +2798,7 @@ module.exports = {
 
     const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
-    const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
+    const requirements = collectMilestoneRequirements(milestoneId);
 
     // TODO(perf): N+1 subprocess -- calls bd children per phase. Batch when bd CLI supports bulk queries.
     const phaseHealth = phases.map(phase => {

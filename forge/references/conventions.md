@@ -22,7 +22,7 @@ This document defines how Forge uses beads to represent project management conce
 |---------|-----------|--------|------------|
 | Project | `epic` | none | description (vision), design (scope/constraints) |
 | Milestone | `epic` | project epic | description (goal), design (audit results), notes (retrospective) |
-| Requirement | `feature` | project or milestone epic | acceptance_criteria, priority |
+| Requirement | `feature` | phase epic | acceptance_criteria, priority |
 | Phase | `epic` | project epic | description (goal), notes (approach) |
 | Task | `task` | phase epic | description (what), acceptance_criteria (done when), estimated_minutes |
 | Research | `task` | phase epic | notes (findings) |

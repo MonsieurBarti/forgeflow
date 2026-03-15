@@ -309,6 +309,53 @@ function normalizeChildren(raw) {
 }
 
 /**
+ * Collect all forge:req beads from a milestone using 3-level traversal:
+ *   milestone -> phases (forge:phase children) -> each phase's children filtered for forge:req
+ *
+ * Also includes legacy fallback: any forge:req beads that are direct children
+ * of the milestone (old data where reqs lived under the milestone directly).
+ *
+ * @param {string} milestoneId  The milestone bead ID
+ * @returns {Array} Deduplicated array of requirement beads
+ */
+function collectMilestoneRequirements(milestoneId) {
+  const milestoneChildren = bdJsonArgs(['children', milestoneId]);
+  const allMilestoneIssues = normalizeChildren(milestoneChildren);
+
+  const seenIds = new Set();
+  const requirements = [];
+
+  const addReq = (req) => {
+    if (seenIds.has(req.id)) return;
+    seenIds.add(req.id);
+    requirements.push(req);
+  };
+
+  // 3-level traversal: milestone -> phases -> phase children filtered for forge:req
+  const phases = allMilestoneIssues.filter(i =>
+    (i.labels || []).includes('forge:phase')
+  );
+  for (const phase of phases) {
+    const phaseChildren = bdJsonArgs(['children', phase.id]);
+    const phaseIssues = normalizeChildren(phaseChildren);
+    for (const issue of phaseIssues) {
+      if ((issue.labels || []).includes('forge:req')) {
+        addReq(issue);
+      }
+    }
+  }
+
+  // Legacy fallback: direct milestone children with forge:req label
+  for (const issue of allMilestoneIssues) {
+    if ((issue.labels || []).includes('forge:req')) {
+      addReq(issue);
+    }
+  }
+
+  return requirements;
+}
+
+/**
  * Validate a bead/project/phase ID to prevent injection.
  * IDs must be lowercase alphanumeric with hyphens, e.g. "abc-1234".
  */
@@ -577,6 +624,7 @@ module.exports = {
   gh,
   output,
   normalizeChildren,
+  collectMilestoneRequirements,
   forgeError,
   validateId,
   // Settings resolution

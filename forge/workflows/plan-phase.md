@@ -32,25 +32,33 @@ bd show <phase-id> --json
 
 If blocked, show what's blocking and suggest working on that first.
 
-## 2.5. Detect Parent Milestone and Fetch Requirements
+## 2.5. Fetch Phase Requirements and Cross-Phase Visibility
 
-Check if the phase belongs to a milestone:
+Fetch requirements owned by this phase (forge:req beads that are children of the phase):
+```bash
+bd children <phase-id> --json
+```
 
+Filter for beads with `forge:req` label. Store as `PHASE_REQS` (list of id, title, description).
+
+For cross-phase visibility, find sibling phases and their requirements:
 ```bash
 bd dep list <phase-id> --direction=up --type=parent-child --json
 ```
 
-Inspect results for any parent bead with `forge:milestone` label:
+Inspect results for any parent bead with `forge:milestone` label. If a milestone is found, get all its phases:
 ```bash
-bd show <parent-id> --json
+bd children <milestone-id> --json
 ```
 
-If a milestone is found, fetch its requirement beads:
+Filter for `forge:phase` beads (excluding the current phase). For each sibling phase, fetch its requirements:
 ```bash
-bd dep list <milestone-id> --direction=up --type=parent-child --json
+bd children <sibling-phase-id> --json
 ```
 
-Filter for beads with `forge:req` label. Store as `MILESTONE_REQS` (list of id, title, description). If no milestone found, set `MILESTONE_REQS` to empty.
+Filter for `forge:req` label. Store as `SIBLING_REQS` (list of id, title, description, owning phase). This gives cross-phase visibility so the planner can wire `validates` dependencies for requirements owned by other phases when tasks in this phase also contribute to them.
+
+If no milestone found, set `SIBLING_REQS` to empty.
 
 ## 3. Research
 
@@ -207,9 +215,9 @@ User decisions: <approach decisions from step 4>
 Retrospective insights: <if RETRO_SECTION non-empty; otherwise omit>
 Requirements addressed by this phase: <relevant requirement IDs and titles>
 
-<if MILESTONE_REQS is non-empty>
-Milestone Requirements (forge:req beads this phase must help satisfy):
-<for each req in MILESTONE_REQS:>
+<if PHASE_REQS is non-empty>
+Phase Requirements (forge:req beads this phase owns and must deliver):
+<for each req in PHASE_REQS:>
 - <req-id>: <req-title> -- <req-description if present>
 
 When creating tasks, wire validates dependencies for applicable requirements:
@@ -217,7 +225,16 @@ When creating tasks, wire validates dependencies for applicable requirements:
 Do this for every task that directly implements or verifies a requirement.
 A single task may validate multiple requirements; a requirement may be validated by multiple
 tasks. When in doubt, prefer to add the link.
-</end milestone section>
+</end phase reqs section>
+
+<if SIBLING_REQS is non-empty>
+Cross-Phase Requirements (forge:req beads owned by sibling phases, for reference):
+<for each req in SIBLING_REQS:>
+- <req-id>: <req-title> (owned by <owning-phase-id>)
+
+If any task in this phase also contributes to a sibling phase's requirement, wire a validates
+dependency to it. This provides cross-phase traceability.
+</end sibling reqs section>
 
 For each task:
 1. Create the task bead with acceptance_criteria
