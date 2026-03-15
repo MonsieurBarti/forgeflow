@@ -65,6 +65,24 @@ function installAgents() {
     console.log(`  Copying agent: ${file}`);
     fs.copyFileSync(path.join(agentsDir, file), path.join(destDir, file));
   }
+
+  // Also create project-local .claude/agents/ with symlinks for reliable
+  // project-level discovery (Claude Code's standard agent discovery path).
+  const projectAgentsDir = path.join(SRC, '.claude', 'agents');
+  ensureDir(projectAgentsDir);
+  for (const file of files) {
+    const linkPath = path.join(projectAgentsDir, file);
+    const target = path.join('..', '..', 'agents', file);
+    try {
+      // Remove existing file/link before creating new symlink
+      try { fs.unlinkSync(linkPath); } catch { /* INTENTIONALLY SILENT */ }
+      fs.symlinkSync(target, linkPath);
+    } catch {
+      // Fallback to copy if symlinks aren't supported (e.g., Windows without admin)
+      fs.copyFileSync(path.join(agentsDir, file), linkPath);
+    }
+  }
+  console.log(`  Created .claude/agents/ symlinks (${files.length} agents)`);
 }
 
 function installHooks() {

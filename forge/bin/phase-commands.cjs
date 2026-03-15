@@ -42,6 +42,35 @@ const CHECKPOINT_ALLOWLIST = [
   'preExistingClosed', 'branchName', 'baseCommitSha', 'timestamp', 'completed',
 ];
 
+/**
+ * Check if real test files exist on disk.
+ * Looks for common test directories (tests/, test/, __tests__/) and
+ * test file patterns (*.test.*, *.spec.*) up to 2 levels deep.
+ */
+function hasActualTestFiles(root) {
+  const testDirs = ['tests', 'test', '__tests__', 'spec'];
+  for (const dir of testDirs) {
+    const dirPath = path.join(root, dir);
+    try {
+      const stat = fs.statSync(dirPath);
+      if (stat.isDirectory()) {
+        const entries = fs.readdirSync(dirPath);
+        if (entries.some(e => /\.(test|spec)\.\w+$/.test(e) || e.endsWith('.test') || e.endsWith('.spec'))) {
+          return true;
+        }
+      }
+    } catch { /* INTENTIONALLY SILENT: dir doesn't exist */ }
+  }
+  // Check src/ and root for *.test.* / *.spec.* files (1 level deep)
+  for (const searchDir of [root, path.join(root, 'src')]) {
+    try {
+      const entries = fs.readdirSync(searchDir);
+      if (entries.some(e => /\.(test|spec)\.\w+$/.test(e))) return true;
+    } catch { /* INTENTIONALLY SILENT */ }
+  }
+  return false;
+}
+
 function detectBuildTest() {
   const root = findGitRoot(process.cwd()) || process.cwd();
 
@@ -82,11 +111,14 @@ function detectBuildTest() {
     const scripts = pkg.scripts || {};
     const buildCmds = scripts.build ? ['npm run build'] : [];
     const testCmds = scripts.test ? ['npm test'] : [];
+    // Only claim has_tests when real test files exist on disk — a package.json
+    // "test" script alone is insufficient (npm init seeds a placeholder script).
+    const hasTestFiles = testCmds.length > 0 && hasActualTestFiles(root);
     return {
       build_cmds: buildCmds,
       test_cmds: testCmds,
       config_source: 'package.json',
-      has_tests: testCmds.length > 0,
+      has_tests: hasTestFiles,
     };
   } catch {
     // INTENTIONALLY SILENT: missing or malformed package.json, fall through.
