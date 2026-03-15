@@ -172,6 +172,10 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: --hash or --all', 'Run: forge-tools quality-gate-fp-clear --hash=<hash> or --all');
     }
 
+    if (!/^[0-9a-f]{16}$/.test(params.hash)) {
+      forgeError('INVALID_ARG', 'hash must be 16 hex characters', 'Run: forge-tools quality-gate-fp-list to see valid hashes');
+    }
+
     const key = `${FP_KEY_PREFIX}${params.hash}`;
     bdArgs(['forget', key]);
 
@@ -180,7 +184,7 @@ module.exports = {
 
   /**
    * Generate a self-contained HTML quality gate report and open it in the browser.
-   * The report file is ephemeral: auto-opened then deleted after 5 seconds.
+   * The report file is ephemeral: auto-opened then deleted after 15 seconds.
    *
    * Usage: quality-gate-report --data='<JSON>'
    *
@@ -231,10 +235,16 @@ module.exports = {
     const reportPath = path.join(os.tmpdir(), `forge-quality-gate-${Date.now()}.html`);
     fs.writeFileSync(reportPath, html, 'utf8');
 
-    // Open in browser — execFileSync avoids shell interpretation
+    // Open in browser — execFileSync avoids shell interpretation.
+    // On Windows, 'start' is a shell builtin (not a binary), so we invoke
+    // cmd.exe /c start instead; the empty '' arg is the window title.
     try {
-      const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-      execFileSync(openCmd, [reportPath], { stdio: 'ignore' });
+      if (process.platform === 'win32') {
+        execFileSync('cmd.exe', ['/c', 'start', '', reportPath], { stdio: 'ignore' });
+      } else {
+        const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+        execFileSync(openCmd, [reportPath], { stdio: 'ignore' });
+      }
     } catch { /* INTENTIONALLY SILENT: browser open is best-effort */ }
 
     // Schedule deletion after 15 seconds (allows slow browser cold-starts)
@@ -261,8 +271,12 @@ const SEVERITY_COLORS = {
 };
 
 function generateReportHTML({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed, timestamp }) {
-  const blockerFindings = findings.filter(f => f.severity === 'critical' || f.severity === 'high');
-  const advisoryFindings = findings.filter(f => f.severity !== 'critical' && f.severity !== 'high');
+  const blockerFindings = [];
+  const advisoryFindings = [];
+  for (const f of findings) {
+    if (f.severity === 'critical' || f.severity === 'high') blockerFindings.push(f);
+    else advisoryFindings.push(f);
+  }
 
   // Group findings by agent
   const byAgent = {};

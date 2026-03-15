@@ -77,6 +77,11 @@ All audit agents (security, code review, performance) MUST output JSON conformin
 - `type-safety` — Type-related issues
 - `dead-code` — Unreachable or unused code
 
+> **Note:** `architecture-mismatch` was previously a code-reviewer category but has been
+> removed. Architecture concerns are now handled by the forge-architect agent, which uses
+> its own set of categories (layer-violation, circular-dependency, abstraction-leak,
+> convention-drift, boundary-breach, coupling-smell).
+
 ### Performance Auditor (`performance-auditor`)
 - `n-plus-one` — N+1 query patterns (ORM calls in loops)
 - `unnecessary-rerender` — Missing memo/useMemo/useCallback

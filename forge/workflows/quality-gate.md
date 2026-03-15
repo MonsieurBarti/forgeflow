@@ -263,6 +263,7 @@ REPORT_TMP=$(mktemp /tmp/forge-qg-data-XXXXXX.json)
 cat > "$REPORT_TMP" <<'EOJSON'
 <REPORT_DATA as JSON>
 EOJSON
+# Double quotes around $(cat ...) are mandatory to prevent word splitting
 node "$HOME/.claude/forge/bin/forge-tools.cjs" quality-gate-report --data="$(cat "$REPORT_TMP")"
 rm -f "$REPORT_TMP"
 ```
