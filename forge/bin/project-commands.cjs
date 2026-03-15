@@ -342,8 +342,12 @@ function collectProjectIssues(projectId) {
   const classifyIssue = (item) => {
     if ((item.labels || []).includes('forge:phase')) return 'phase';
     if ((item.labels || []).includes('forge:req')) return 'req';
+    if ((item.labels || []).includes('forge:quick')) return 'quick';
     return null;
   };
+
+  // Quick tasks (direct children of project with forge:quick label)
+  const quickTasks = [];
 
   // Collect from milestones (correct hierarchy) with per-milestone grouping
   for (const ms of milestones) {
@@ -384,6 +388,18 @@ function collectProjectIssues(projectId) {
     const kind = classifyIssue(i);
     if (kind === 'phase') { phases.push(i); legacyPhases.push(i); }
     else if (kind === 'req') { requirements.push(i); legacyReqs.push(i); }
+    else if (kind === 'quick') {
+      const children = normalizeChildren(bdJson(`children ${i.id}`));
+      const prMatch = (i.notes || '').match(/PR:\s*(https?:\/\/\S+)/);
+      quickTasks.push({
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        description: i.description || '',
+        children: children.map(c => ({ id: c.id, title: c.title, status: c.status })),
+        prUrl: prMatch ? prMatch[1] : null,
+      });
+    }
   }
 
   // If there are legacy items not under any milestone, group them as "Ungrouped"
@@ -403,7 +419,7 @@ function collectProjectIssues(projectId) {
     });
   }
 
-  return { milestones, phases, requirements, milestoneDetails };
+  return { milestones, phases, requirements, milestoneDetails, quickTasks };
 }
 
 /**
@@ -621,7 +637,7 @@ function generateDashboardHTML(data) {
   const {
     projectTitle, projectId, timestamp, progressPercent,
     totalPhases, completedPhases, phaseDetails, reqCoverage,
-    milestones = [], agents = [],
+    milestones = [], agents = [], quickTasks = [],
   } = data;
 
   const phasesOpen = phaseDetails.filter(p => p.status === 'open').length;
@@ -757,6 +773,24 @@ function generateDashboardHTML(data) {
           <div class="agent-desc">${esc(a.description)}</div>
           <span class="agent-badge" style="background:${resolvedColor}20;color:${resolvedColor};border:1px solid ${resolvedColor}40">${esc(a.color || 'default')}</span>
         </div>`;
+  }).join('\n');
+
+  // Quick task cards
+  const quickTaskCardsHTML = quickTasks.map(qt => {
+    const statusClass = qt.status === 'closed' ? 'phase-done' : qt.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+    const statusBadge = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
+    const childrenHTML = qt.children.length > 0 ? `<ul class="task-list">${qt.children.map(c => `<li class="${c.status === 'closed' ? 'task-done' : 'task-pending'}"><span class="task-icon">${c.status === 'closed' ? '&#x2713;' : '&#x25CB;'}</span> ${esc(c.title)}</li>`).join('\n')}</ul>` : '';
+    const prLinkHTML = qt.prUrl ? `<a href="${esc(qt.prUrl)}" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>` : '';
+    return `
+          <div class="phase-card ${statusClass}">
+            <div class="phase-header">
+              <h3>${esc(qt.title)}</h3>
+              <span class="badge badge-${statusClass}">${statusBadge}</span>
+            </div>
+            ${qt.description ? `<p class="phase-desc">${esc(qt.description)}</p>` : ''}
+            ${childrenHTML}
+            ${prLinkHTML}
+          </div>`;
   }).join('\n');
 
   // Overall SVG progress rings data
@@ -1225,6 +1259,24 @@ function generateDashboardHTML(data) {
   .req-covered { background: rgba(34,197,94,0.08); color: var(--green); border: 1px solid rgba(34,197,94,0.15); }
   .req-uncovered { background: rgba(239,68,68,0.08); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
 
+  /* --- Quick tasks --- */
+  .quick-tasks-section { margin-top: 2.5rem; }
+  .quick-tasks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 0.75rem;
+  }
+  .quick-pr-link {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.15s ease;
+  }
+  .quick-pr-link:hover { color: var(--blue); text-decoration: underline; }
+
   /* --- Agent roster --- */
   .agent-section { margin-top: 3rem; }
   .agent-grid {
@@ -1302,6 +1354,7 @@ function generateDashboardHTML(data) {
     .ms-header { flex-direction: column; gap: 1rem; text-align: center; }
     .agent-grid { grid-template-columns: 1fr; }
     .req-grid { grid-template-columns: 1fr; }
+    .quick-tasks-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -1394,6 +1447,15 @@ function generateDashboardHTML(data) {
     </div>`;
   }).join('\n')}
   `}
+
+  <!-- Quick Tasks -->
+  ${quickTasks.length > 0 ? `
+  <div class="quick-tasks-section">
+    <h3 class="section-title">Quick Tasks</h3>
+    <div class="quick-tasks-grid">
+      ${quickTaskCardsHTML}
+    </div>
+  </div>` : ''}
 
   <!-- Agent Roster -->
   ${agents.length > 0 ? `
@@ -1706,7 +1768,7 @@ module.exports = {
     validateId(projectId);
 
     const project = bdJson(`show ${projectId}`);
-    const { phases, requirements, milestoneDetails } = collectProjectIssues(projectId);
+    const { phases, requirements, milestoneDetails, quickTasks } = collectProjectIssues(projectId);
 
     // Build phaseDetails once (keyed by ID) and reqCoverage once globally
     const phaseDetails = sortPhaseDetails(buildPhaseDetails(phases, { includeMeta: true }));
@@ -1753,6 +1815,7 @@ module.exports = {
       phaseDetails, reqCoverage,
       milestones: milestonesGrouped,
       agents,
+      quickTasks,
     };
 
     const html = generateDashboardHTML(data);

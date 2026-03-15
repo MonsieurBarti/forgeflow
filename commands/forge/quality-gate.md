@@ -36,11 +36,15 @@ When parsing agent responses (step 4), apply tolerant JSON parsing: strip markdo
 extract the JSON object between the first `{` and last `}`, validate the schema structure.
 If an agent fails to produce valid JSON, continue with the other agents' results.
 
-When presenting findings (steps 7-8), use AskUserQuestion with `multiSelect:true` for each
-severity group (blockers first, then advisory). Let the user select which findings to fix.
+After agent parsing (step 5), load known false-positives (step 6) to filter out previously
+marked FPs before merging findings.
 
-When applying fixes (step 9), create fix task beads for each approved finding, then spawn a
-single forge-executor agent to batch-apply all approved fixes in one commit.
+When presenting findings (steps 8-9), use AskUserQuestion with `multiSelect:true` for each
+severity group (blockers first, then advisory). Let the user select which findings to fix
+or mark as false-positive for future runs.
+
+When applying fixes (step 10), create fix task beads for each approved finding, then spawn
+domain-specific fixer agents to batch-apply approved fixes.
 
 The quality gate is capped at 1 round of fixes. After the fixer agent completes, do NOT
 re-run audit agents. Report the summary and stop.
