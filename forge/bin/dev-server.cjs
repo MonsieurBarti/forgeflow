@@ -75,10 +75,13 @@ function validateToken(reqUrl, expectedToken) {
  * @param {string} opts.html      - Full HTML string to serve on GET /
  * @param {number} [opts.timeout] - Timeout in ms (default 1800000 = 30 min)
  * @param {string} [opts.title]   - Page title (informational, not used in serving)
+ * @param {Array<{method: string, path: string, handler: function}>} [opts.routes]
+ *   Optional custom routes matched before default handlers. Each handler
+ *   receives (req, res, token). Invalid entries are silently skipped.
  * @returns {Promise<object>} Resolves with the parsed JSON body from POST /decide
  * @throws {TimeoutError} If the timeout elapses before a decision is received
  */
-async function serveAndAwaitDecision({ html, timeout = 1800000, title } = {}) {
+async function serveAndAwaitDecision({ html, timeout = 1800000, title, routes } = {}) {
   if (!html || typeof html !== 'string') {
     throw new Error('dev-server: opts.html is required and must be a string');
   }
@@ -98,6 +101,17 @@ async function serveAndAwaitDecision({ html, timeout = 1800000, title } = {}) {
     }
 
     const pathname = new URL(req.url, 'http://localhost').pathname;
+
+    // Custom routes -- matched before built-in handlers.
+    if (Array.isArray(routes)) {
+      for (const route of routes) {
+        if (!route || typeof route.method !== 'string' || typeof route.path !== 'string' || typeof route.handler !== 'function') continue;
+        if (req.method === route.method.toUpperCase() && pathname === route.path) {
+          route.handler(req, res, token);
+          return;
+        }
+      }
+    }
 
     // GET / -- serve the caller-provided HTML.
     if (req.method === 'GET' && pathname === '/') {
