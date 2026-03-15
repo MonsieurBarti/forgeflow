@@ -211,11 +211,6 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: --data', 'Run: forge-tools quality-gate-report --data=\'<JSON>\'');
     }
 
-    const DATA_SIZE_LIMIT = 10 * 1024 * 1024; // 10 MB
-    if (Buffer.byteLength(dataStr, 'utf8') > DATA_SIZE_LIMIT) {
-      forgeError('DATA_TOO_LARGE', '--data exceeds 10 MB size limit', 'Reduce the size of the --data JSON payload');
-    }
-
     let data;
     try {
       data = JSON.parse(dataStr);
@@ -279,7 +274,7 @@ module.exports = {
    * Accepts the same --data schema as quality-gate-report.
    *
    * When web_ui=true:  starts dev-server, returns {fixIds[], ignoreIds[]} from user.
-   * When web_ui=false: runs quality-gate-report, returns {fallback: true}.
+   * When web_ui=false: generates static report HTML and returns {fallback: true}.
    */
   'quality-gate-triage'(args) {
     let dataStr = '';
@@ -292,11 +287,6 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: --data', 'Run: forge-tools quality-gate-triage --data=\'<JSON>\'');
     }
 
-    const DATA_SIZE_LIMIT = 10 * 1024 * 1024; // 10 MB
-    if (Buffer.byteLength(dataStr, 'utf8') > DATA_SIZE_LIMIT) {
-      forgeError('DATA_TOO_LARGE', '--data exceeds 10 MB size limit', 'Reduce the size of the --data JSON payload');
-    }
-
     let data;
     try {
       data = JSON.parse(dataStr);
@@ -305,12 +295,6 @@ module.exports = {
     }
 
     const settings = resolveSettings();
-    if (!settings.web_ui) {
-      // Fallback: run the static report and signal the caller to use AskUserQuestion
-      module.exports['quality-gate-report'](args);
-      output({ fallback: true });
-      return;
-    }
 
     const {
       agents = [],
@@ -320,14 +304,44 @@ module.exports = {
       summary = {},
     } = data;
 
-    const totalFindings = summary.totalAfterFilter || findings.length;
-    const hasBlockers = (summary.blockers || 0) > 0;
-    const passed = totalFindings === 0;
+    if (!settings.web_ui) {
+      // Fallback: generate and open the static report, signal caller to use AskUserQuestion.
+      // Emits a single output combining report path and fallback flag.
+      const totalFindings = summary.totalAfterFilter || findings.length;
+      const hasBlockers = (summary.blockers || 0) > 0;
+      const passed = totalFindings === 0;
+
+      const html = generateReportHTML({
+        agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed,
+        timestamp: new Date().toISOString(),
+      });
+
+      const reportPath = path.join(os.tmpdir(), `forge-quality-gate-${Date.now()}.html`);
+      fs.writeFileSync(reportPath, html, 'utf8');
+
+      try {
+        if (!reportPath.startsWith(os.tmpdir())) {
+          throw new Error('reportPath is outside os.tmpdir() -- refusing to open');
+        }
+        if (process.platform === 'win32') {
+          execFileSync('cmd.exe', ['/c', 'start', '', reportPath], { stdio: 'ignore' });
+        } else {
+          const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+          execFileSync(openCmd, [reportPath], { stdio: 'ignore' });
+        }
+      } catch { /* INTENTIONALLY SILENT: browser open is best-effort */ }
+
+      setTimeout(() => {
+        try { fs.unlinkSync(reportPath); } catch { /* INTENTIONALLY SILENT */ }
+      }, 15000);
+
+      output({ fallback: true, report_path: reportPath, findings_count: totalFindings });
+      return;
+    }
 
     // Return a promise -- index.cjs handles async dispatch
     return generateTriageAndServe({
       agents, findings, filteredFps, changedFiles, summary,
-      totalFindings, hasBlockers, passed,
     });
   },
 };
@@ -342,16 +356,196 @@ const SEVERITY_COLORS = {
   info:     { bg: '#1a1a2e', border: '#6b7280', text: '#9ca3af', badge: '#4b5563' },
 };
 
+/**
+ * Build severity-specific CSS rules shared between report and triage pages.
+ */
+function buildSeverityCSS() {
+  return Object.entries(SEVERITY_COLORS).map(([sev, c]) => `
+  .finding-${sev} { border-left: 3px solid ${c.border}; background: ${c.bg}; }
+  .sev-${sev} { background: ${c.badge}; }
+  .finding-title-${sev} { color: ${c.text}; }`).join('\n');
+}
+
+/**
+ * Shared CSS template for verdict banner, stat cards, agent cards, finding cards,
+ * collapsible sections, empty state, and footer. Used by both generateReportHTML
+ * and generateTriageHTML.
+ *
+ * verdictColor and severityCSS depend on per-page data and are passed as arguments.
+ */
+function buildSharedCSS(verdictColor, severityCSS) {
+  return `
+  ${COMPONENT_CSS}
+
+  body { padding: 32px; }
+  .container { max-width: 900px; margin: 0 auto; }
+
+  /* Verdict banner */
+  .verdict-banner {
+    text-align: center; padding: 32px 24px; border-radius: 12px; margin-bottom: 32px;
+    background: linear-gradient(135deg, var(--surface-solid) 0%, #1a1a2e 100%);
+    border: 2px solid ${verdictColor};
+  }
+  .verdict-icon { font-size: 48px; margin-bottom: 8px; }
+  .verdict-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; color: ${verdictColor}; }
+  .verdict-sub { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
+
+  /* Stat cards */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; margin-top: 20px; }
+  .stat-card {
+    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px; text-align: center;
+    border: 1px solid var(--border);
+  }
+  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
+  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+  .text-ok { color: var(--green); }
+  .text-warn { color: var(--orange); }
+  .text-danger { color: var(--red); }
+  .text-muted { color: var(--text-muted); }
+
+  /* Agent cards */
+  .agents-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+  .qg-agent-card {
+    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px;
+    border: 1px solid var(--border); flex: 1; min-width: 140px;
+  }
+  .qg-agent-icon { font-size: 18px; font-weight: 700; }
+  .agent-ok { color: var(--green); }
+  .agent-fail { color: var(--red); }
+  .qg-agent-name { color: var(--text); font-size: 13px; font-weight: 500; margin-top: 4px; }
+  .qg-agent-count { color: var(--text-muted); font-size: 12px; }
+
+  /* Details / collapsible */
+  details > summary { list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '\\25B6 '; font-size: 10px; margin-right: 6px; color: var(--text-muted); }
+  details[open] > summary::before { content: '\\25BC '; }
+
+  /* Agent findings sections */
+  .agent-section { margin-bottom: 24px; }
+  .agent-summary {
+    cursor: pointer; font-size: 16px; font-weight: 600; color: var(--text);
+    padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  .agent-count { color: var(--text-muted); font-weight: 400; }
+  .section-title {
+    font-size: 18px; font-weight: 600; color: var(--text-secondary);
+    margin: 32px 0 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  }
+
+  /* Finding cards */
+  .finding { padding: 12px 16px; border-radius: 6px; margin-bottom: 8px; }
+  .finding-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .sev-badge {
+    color: #fff; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+  }
+  .finding-title { font-weight: 500; }
+  .finding-location { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
+  .finding-desc { color: #d4d4d8; font-size: 13px; margin-bottom: 6px; }
+  .finding-fix { color: #86efac; font-size: 13px; }
+  ${severityCSS}
+
+  /* Collapsible sections */
+  .collapsible-summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 0; }
+  .fp-section { margin-top: 32px; }
+  .fp-list { margin-top: 8px; }
+  .fp-item {
+    padding: 6px 12px; background: var(--surface-solid); border-radius: 4px;
+    margin-bottom: 4px; color: var(--text-muted); font-size: 13px;
+  }
+  .fp-agent { color: var(--text-secondary); }
+  .changed-files-section { margin-top: 24px; }
+  .changed-files-list { margin-top: 8px; columns: 2; column-gap: 16px; }
+  .changed-file { color: var(--text-secondary); font-size: 12px; padding: 2px 0; }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 40px; color: #3f3f46; font-size: 16px; margin-top: 32px; }
+
+  /* Footer */
+  .footer {
+    text-align: center; color: #3f3f46; font-size: 12px;
+    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--surface-solid);
+  }`;
+}
+
+// --- Shared HTML fragment builders ---
+
+/**
+ * Build the verdict banner HTML (icon, text, sub-text) and return the verdict color.
+ */
+function buildVerdictHTML(totalFindings, agents, passed, hasBlockers) {
+  const verdictColor = passed ? 'var(--green)' : hasBlockers ? 'var(--red)' : 'var(--orange)';
+  const verdictText = passed ? 'PASSED' : hasBlockers ? 'BLOCKERS FOUND' : 'ADVISORY ONLY';
+  const verdictIcon = passed ? '\u2713' : hasBlockers ? '\u2717' : '\u26A0';
+
+  return {
+    verdictColor,
+    html: `
+  <div class="verdict-banner">
+    <div class="verdict-icon">${esc(verdictIcon)}</div>
+    <div class="verdict-text">${esc(verdictText)}</div>
+    <div class="verdict-sub">${totalFindings} finding${totalFindings !== 1 ? 's' : ''} across ${agents.length} agent${agents.length !== 1 ? 's' : ''}</div>
+  </div>`,
+  };
+}
+
+/**
+ * Build the stats grid HTML from summary data.
+ * Blocker/advisory counts are derived from findings via a single reduce pass
+ * when not already present in summary.
+ */
+function buildStatsHTML(summary, findings, filteredFps, totalFindings) {
+  const { blockerCount, advisoryCount } = findings.reduce((acc, f) => {
+    if (f.severity === 'critical' || f.severity === 'high') acc.blockerCount++;
+    else acc.advisoryCount++;
+    return acc;
+  }, { blockerCount: 0, advisoryCount: 0 });
+
+  return `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">${summary.agentsRun || 0}</div>
+        <div class="stat-label">Agents run</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value ${(summary.totalBeforeFilter || 0) > 0 ? 'text-warn' : 'text-ok'}">${summary.totalBeforeFilter || totalFindings}</div>
+        <div class="stat-label">Total found</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value text-danger">${summary.blockers !== undefined ? summary.blockers : blockerCount}</div>
+        <div class="stat-label">Blockers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value text-warn">${summary.advisory !== undefined ? summary.advisory : advisoryCount}</div>
+        <div class="stat-label">Advisory</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value text-muted">${filteredFps.length}</div>
+        <div class="stat-label">FPs filtered</div>
+      </div>
+    </div>`;
+}
+
+/**
+ * Build agent status cards HTML.
+ */
+function buildAgentCardsHTML(agents) {
+  return agents.map(a => {
+    const isOk = a.status === 'success' || a.status === 'completed';
+    const cls = isOk ? 'agent-ok' : 'agent-fail';
+    return `
+      <div class="qg-agent-card">
+        <div class="qg-agent-icon ${cls}">${isOk ? '\u2713' : '\u2717'}</div>
+        <div class="qg-agent-name">${esc(a.name)}</div>
+        <div class="qg-agent-count">${a.findingsCount || 0} finding${(a.findingsCount || 0) !== 1 ? 's' : ''}</div>
+      </div>`;
+  }).join('\n');
+}
+
 // TODO: generateReportHTML (~240 lines) interleaves data transformation, CSS construction,
 // and HTML assembly. Separate into distinct helpers in a future phase to improve readability.
 function generateReportHTML({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed, timestamp }) {
-  const blockerFindings = [];
-  const advisoryFindings = [];
-  for (const f of findings) {
-    if (f.severity === 'critical' || f.severity === 'high') blockerFindings.push(f);
-    else advisoryFindings.push(f);
-  }
-
   // Group findings by agent
   const byAgent = {};
   for (const f of findings) {
@@ -418,150 +612,15 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
       </details>
     </div>` : '';
 
-  const agentCardsHTML = agents.map(a => {
-    const isOk = a.status === 'success' || a.status === 'completed';
-    const cls = isOk ? 'agent-ok' : 'agent-fail';
-    return `
-      <div class="qg-agent-card">
-        <div class="qg-agent-icon ${cls}">${isOk ? '\u2713' : '\u2717'}</div>
-        <div class="qg-agent-name">${esc(a.name)}</div>
-        <div class="qg-agent-count">${a.findingsCount || 0} finding${(a.findingsCount || 0) !== 1 ? 's' : ''}</div>
-      </div>`;
-  }).join('\n');
-
-  const verdictColor = passed ? 'var(--green)' : hasBlockers ? 'var(--red)' : 'var(--orange)';
-  const verdictText = passed ? 'PASSED' : hasBlockers ? 'BLOCKERS FOUND' : 'ADVISORY ONLY';
-  const verdictIcon = passed ? '\u2713' : hasBlockers ? '\u2717' : '\u26A0';
-
-  const statsHTML = `
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value">${summary.agentsRun || agents.length}</div>
-        <div class="stat-label">Agents run</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value ${(summary.totalBeforeFilter || 0) > 0 ? 'text-warn' : 'text-ok'}">${summary.totalBeforeFilter || totalFindings}</div>
-        <div class="stat-label">Total found</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-danger">${summary.blockers || blockerFindings.length}</div>
-        <div class="stat-label">Blockers</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-warn">${summary.advisory || advisoryFindings.length}</div>
-        <div class="stat-label">Advisory</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-muted">${filteredFps.length}</div>
-        <div class="stat-label">FPs filtered</div>
-      </div>
-    </div>`;
-
-  // Severity-specific CSS using hardcoded colors (these are severity-specific, not theme tokens)
-  const severityCSS = Object.entries(SEVERITY_COLORS).map(([sev, c]) => `
-  .finding-${sev} { border-left: 3px solid ${c.border}; background: ${c.bg}; }
-  .sev-${sev} { background: ${c.badge}; }
-  .finding-title-${sev} { color: ${c.text}; }`).join('\n');
-
-  const extraCSS = `
-  body { padding: 32px; }
-  .container { max-width: 900px; margin: 0 auto; }
-
-  /* Verdict banner */
-  .verdict-banner {
-    text-align: center; padding: 32px 24px; border-radius: 12px; margin-bottom: 32px;
-    background: linear-gradient(135deg, var(--surface-solid) 0%, #1a1a2e 100%);
-    border: 2px solid ${verdictColor};
-  }
-  .verdict-icon { font-size: 48px; margin-bottom: 8px; }
-  .verdict-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; color: ${verdictColor}; }
-  .verdict-sub { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
-
-  /* Stat cards */
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; margin-top: 20px; }
-  .stat-card {
-    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px; text-align: center;
-    border: 1px solid var(--border);
-  }
-  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
-  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
-  .text-ok { color: var(--green); }
-  .text-warn { color: var(--orange); }
-  .text-danger { color: var(--red); }
-  .text-muted { color: var(--text-muted); }
-
-  /* Agent cards */
-  .agents-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
-  .qg-agent-card {
-    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px;
-    border: 1px solid var(--border); flex: 1; min-width: 140px;
-  }
-  .qg-agent-icon { font-size: 18px; font-weight: 700; }
-  .agent-ok { color: var(--green); }
-  .agent-fail { color: var(--red); }
-  .qg-agent-name { color: var(--text); font-size: 13px; font-weight: 500; margin-top: 4px; }
-  .qg-agent-count { color: var(--text-muted); font-size: 12px; }
-
-  /* Details / collapsible */
-  details > summary { list-style: none; }
-  details > summary::-webkit-details-marker { display: none; }
-  details > summary::before { content: '\\25B6 '; font-size: 10px; margin-right: 6px; color: var(--text-muted); }
-  details[open] > summary::before { content: '\\25BC '; }
-
-  /* Agent findings sections */
-  .agent-section { margin-bottom: 24px; }
-  .agent-summary {
-    cursor: pointer; font-size: 16px; font-weight: 600; color: var(--text);
-    padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;
-  }
-  .agent-count { color: var(--text-muted); font-weight: 400; }
-  .section-title {
-    font-size: 18px; font-weight: 600; color: var(--text-secondary);
-    margin: 32px 0 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
-  }
-
-  /* Finding cards */
-  .finding { padding: 12px 16px; border-radius: 6px; margin-bottom: 8px; }
-  .finding-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .sev-badge {
-    color: #fff; padding: 2px 8px; border-radius: 4px;
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-  }
-  .finding-title { font-weight: 500; }
-  .finding-location { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
-  .finding-desc { color: #d4d4d8; font-size: 13px; margin-bottom: 6px; }
-  .finding-fix { color: #86efac; font-size: 13px; }
-  ${severityCSS}
-
-  /* Collapsible sections */
-  .collapsible-summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 0; }
-  .fp-section { margin-top: 32px; }
-  .fp-list { margin-top: 8px; }
-  .fp-item {
-    padding: 6px 12px; background: var(--surface-solid); border-radius: 4px;
-    margin-bottom: 4px; color: var(--text-muted); font-size: 13px;
-  }
-  .fp-agent { color: var(--text-secondary); }
-  .changed-files-section { margin-top: 24px; }
-  .changed-files-list { margin-top: 8px; columns: 2; column-gap: 16px; }
-  .changed-file { color: var(--text-secondary); font-size: 12px; padding: 2px 0; }
-
-  /* Empty state */
-  .empty-state { text-align: center; padding: 40px; color: #3f3f46; font-size: 16px; margin-top: 32px; }
-
-  /* Footer */
-  .footer {
-    text-align: center; color: #3f3f46; font-size: 12px;
-    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--surface-solid);
-  }`;
+  const agentCardsHTML = buildAgentCardsHTML(agents);
+  const statsHTML = buildStatsHTML(summary, findings, filteredFps, totalFindings);
+  const { verdictColor, html: verdictBannerHTML } = buildVerdictHTML(totalFindings, agents, passed, hasBlockers);
+  const severityCSS = buildSeverityCSS();
+  const extraCSS = buildSharedCSS(verdictColor, severityCSS);
 
   const bodyHTML = `
 <div class="container">
-  <div class="verdict-banner">
-    <div class="verdict-icon">${esc(verdictIcon)}</div>
-    <div class="verdict-text">${esc(verdictText)}</div>
-    <div class="verdict-sub">${totalFindings} finding${totalFindings !== 1 ? 's' : ''} across ${agents.length} agent${agents.length !== 1 ? 's' : ''}</div>
-  </div>
+  ${verdictBannerHTML}
 
   ${agents.length > 0 ? `<div class="agents-row">${agentCardsHTML}</div>` : ''}
 
@@ -594,11 +653,10 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
  * Build triage HTML page and serve it via dev-server. Resolves with the user's
  * {fixIds, ignoreIds} decision, which is output as JSON to stdout.
  */
-async function generateTriageAndServe({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed }) {
+async function generateTriageAndServe({ agents, findings, filteredFps, changedFiles, summary }) {
   const timestamp = new Date().toISOString();
   const html = generateTriageHTML({
-    agents, findings, filteredFps, changedFiles, summary,
-    totalFindings, hasBlockers, passed, timestamp,
+    agents, findings, filteredFps, changedFiles, summary, timestamp,
   });
 
   const decision = await serveAndAwaitDecision({
@@ -615,22 +673,20 @@ async function generateTriageAndServe({ agents, findings, filteredFps, changedFi
  * Select All / Deselect All toggle, and a Submit button that POSTs to /decide.
  *
  * Uses design-system.cjs components (wrapPage, card, badge) for consistent styling.
+ * Accepts raw data only; totalFindings, hasBlockers, and passed are computed internally.
  */
-function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed, timestamp }) {
-  // Group findings by agent, sorted by severity within each group
-  const byAgent = {};
-  for (const f of findings) {
-    const a = f.agent || 'unknown';
-    if (!byAgent[a]) byAgent[a] = [];
-    byAgent[a].push(f);
-  }
+function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summary, timestamp }) {
+  // Derive computed values from raw data internally
+  const totalFindings = summary.totalAfterFilter !== undefined ? summary.totalAfterFilter : findings.length;
+  const hasBlockers = (summary.blockers || 0) > 0 || findings.some(f => f.severity === 'critical' || f.severity === 'high');
+  const passed = totalFindings === 0;
 
   const sevOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
   // Assign each finding a stable ID based on its index in the original array
   const findingsWithIds = findings.map((f, i) => ({ ...f, _id: `finding-${i}` }));
 
-  // Re-group with IDs attached
+  // Group with IDs attached
   const byAgentWithIds = {};
   for (const f of findingsWithIds) {
     const a = f.agent || 'unknown';
@@ -675,49 +731,9 @@ function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summa
     });
   }).join('\n');
 
-  // Stats summary (reuses the same pattern as generateReportHTML)
-  const blockerCount = summary.blockers || findings.filter(f => f.severity === 'critical' || f.severity === 'high').length;
-  const advisoryCount = summary.advisory || findings.filter(f => f.severity !== 'critical' && f.severity !== 'high').length;
-
-  const verdictColor = passed ? 'var(--green)' : hasBlockers ? 'var(--red)' : 'var(--orange)';
-  const verdictText = passed ? 'PASSED' : hasBlockers ? 'BLOCKERS FOUND' : 'ADVISORY ONLY';
-  const verdictIcon = passed ? '\u2713' : hasBlockers ? '\u2717' : '\u26A0';
-
-  const statsHTML = `
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value">${summary.agentsRun || agents.length}</div>
-        <div class="stat-label">Agents run</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value ${(summary.totalBeforeFilter || 0) > 0 ? 'text-warn' : 'text-ok'}">${summary.totalBeforeFilter || totalFindings}</div>
-        <div class="stat-label">Total found</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-danger">${blockerCount}</div>
-        <div class="stat-label">Blockers</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-warn">${advisoryCount}</div>
-        <div class="stat-label">Advisory</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value text-muted">${filteredFps.length}</div>
-        <div class="stat-label">FPs filtered</div>
-      </div>
-    </div>`;
-
-  // Agent status cards
-  const agentCardsHTML = agents.map(a => {
-    const isOk = a.status === 'success' || a.status === 'completed';
-    const cls = isOk ? 'agent-ok' : 'agent-fail';
-    return `
-      <div class="qg-agent-card">
-        <div class="qg-agent-icon ${cls}">${isOk ? '\u2713' : '\u2717'}</div>
-        <div class="qg-agent-name">${esc(a.name)}</div>
-        <div class="qg-agent-count">${a.findingsCount || 0} finding${(a.findingsCount || 0) !== 1 ? 's' : ''}</div>
-      </div>`;
-  }).join('\n');
+  const agentCardsHTML = buildAgentCardsHTML(agents);
+  const statsHTML = buildStatsHTML(summary, findings, filteredFps, totalFindings);
+  const { verdictColor, html: verdictBannerHTML } = buildVerdictHTML(totalFindings, agents, passed, hasBlockers);
 
   // FP section (collapsed)
   const fpHTML = filteredFps.length > 0 ? `
@@ -736,8 +752,8 @@ function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summa
     </div>` : '';
 
   // Inline JS for checkbox interactions and form submission.
-  // The TOKEN placeholder is replaced by dev-server's URL query param which the
-  // page reads from window.location.search on load.
+  // The token is extracted from window.location.search at runtime (set by dev-server
+  // in the URL as ?token=<TOKEN>).
   const inlineJS = `
 <script>
 (function() {
@@ -806,58 +822,8 @@ function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summa
 })();
 <\/script>`;
 
-  // Severity-specific CSS (same as generateReportHTML)
-  const severityCSS = Object.entries(SEVERITY_COLORS).map(([sev, c]) => `
-  .finding-${sev} { border-left: 3px solid ${c.border}; background: ${c.bg}; }
-  .sev-${sev} { background: ${c.badge}; }
-  .finding-title-${sev} { color: ${c.text}; }`).join('\n');
-
-  const extraCSS = `
-  ${COMPONENT_CSS}
-
-  body { padding: 32px; }
-  .container { max-width: 900px; margin: 0 auto; }
-
-  /* Verdict banner */
-  .verdict-banner {
-    text-align: center; padding: 32px 24px; border-radius: 12px; margin-bottom: 32px;
-    background: linear-gradient(135deg, var(--surface-solid) 0%, #1a1a2e 100%);
-    border: 2px solid ${verdictColor};
-  }
-  .verdict-icon { font-size: 48px; margin-bottom: 8px; }
-  .verdict-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; color: ${verdictColor}; }
-  .verdict-sub { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
-
-  /* Stat cards */
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; margin-top: 20px; }
-  .stat-card {
-    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px; text-align: center;
-    border: 1px solid var(--border);
-  }
-  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
-  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
-  .text-ok { color: var(--green); }
-  .text-warn { color: var(--orange); }
-  .text-danger { color: var(--red); }
-  .text-muted { color: var(--text-muted); }
-
-  /* Agent cards */
-  .agents-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
-  .qg-agent-card {
-    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px;
-    border: 1px solid var(--border); flex: 1; min-width: 140px;
-  }
-  .qg-agent-icon { font-size: 18px; font-weight: 700; }
-  .agent-ok { color: var(--green); }
-  .agent-fail { color: var(--red); }
-  .qg-agent-name { color: var(--text); font-size: 13px; font-weight: 500; margin-top: 4px; }
-  .qg-agent-count { color: var(--text-muted); font-size: 12px; }
-
-  /* Details / collapsible */
-  details > summary { list-style: none; }
-  details > summary::-webkit-details-marker { display: none; }
-  details > summary::before { content: '\\25B6 '; font-size: 10px; margin-right: 6px; color: var(--text-muted); }
-  details[open] > summary::before { content: '\\25BC '; }
+  const severityCSS = buildSeverityCSS();
+  const extraCSS = buildSharedCSS(verdictColor, severityCSS) + `
 
   /* Triage-specific styles */
   .triage-controls {
@@ -888,50 +854,11 @@ function generateTriageHTML({ agents, findings, filteredFps, changedFiles, summa
     margin-top: 4px; width: 16px; height: 16px; accent-color: var(--accent);
     cursor: pointer; flex-shrink: 0;
   }
-  .triage-content { flex: 1; }
-  .section-title {
-    font-size: 18px; font-weight: 600; color: var(--text-secondary);
-    margin: 32px 0 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
-  }
-
-  /* Finding cards (shared with report) */
-  .finding-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-  .sev-badge {
-    color: #fff; padding: 2px 8px; border-radius: 4px;
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-  }
-  .finding-title { font-weight: 500; }
-  .finding-location { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
-  .finding-desc { color: #d4d4d8; font-size: 13px; margin-bottom: 6px; }
-  .finding-fix { color: #86efac; font-size: 13px; }
-  ${severityCSS}
-
-  /* Collapsible sections */
-  .collapsible-summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 0; }
-  .fp-section { margin-top: 32px; }
-  .fp-list { margin-top: 8px; }
-  .fp-item {
-    padding: 6px 12px; background: var(--surface-solid); border-radius: 4px;
-    margin-bottom: 4px; color: var(--text-muted); font-size: 13px;
-  }
-  .fp-agent { color: var(--text-secondary); }
-
-  /* Empty state */
-  .empty-state { text-align: center; padding: 40px; color: #3f3f46; font-size: 16px; margin-top: 32px; }
-
-  /* Footer */
-  .footer {
-    text-align: center; color: #3f3f46; font-size: 12px;
-    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--surface-solid);
-  }`;
+  .triage-content { flex: 1; }`;
 
   const bodyHTML = `
 <div class="container">
-  <div class="verdict-banner">
-    <div class="verdict-icon">${esc(verdictIcon)}</div>
-    <div class="verdict-text">${esc(verdictText)}</div>
-    <div class="verdict-sub">${totalFindings} finding${totalFindings !== 1 ? 's' : ''} across ${agents.length} agent${agents.length !== 1 ? 's' : ''}</div>
-  </div>
+  ${verdictBannerHTML}
 
   ${agents.length > 0 ? `<div class="agents-row">${agentCardsHTML}</div>` : ''}
 
