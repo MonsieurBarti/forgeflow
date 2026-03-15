@@ -25,6 +25,7 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
+const { esc, CSS_VARS, wrapPage } = require('./design-system.cjs');
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -643,12 +644,6 @@ function collectAgentRoster() {
   return agents;
 }
 
-// generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
-
-function esc(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 function generateDashboardHTML(data) {
   const {
     projectTitle, projectId, timestamp, progressPercent,
@@ -814,47 +809,7 @@ function generateDashboardHTML(data) {
   const reqRingPct = reqsTotal > 0 ? Math.round((reqsCovered / reqsTotal) * 100) : 0;
   const circumference = Math.round(2 * Math.PI * 54);
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(projectTitle)} - Dashboard</title>
-<style>
-  :root {
-    --bg: #09090b;
-    --surface: rgba(255,255,255,0.03);
-    --surface-solid: #111113;
-    --surface-2: rgba(255,255,255,0.06);
-    --surface-hover: rgba(255,255,255,0.08);
-    --border: rgba(255,255,255,0.06);
-    --border-subtle: rgba(255,255,255,0.04);
-    --text: #fafafa;
-    --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
-    --accent: #6366f1;
-    --green: #22c55e;
-    --orange: #f59e0b;
-    --red: #ef4444;
-    --blue: #3b82f6;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-    min-height: 100vh;
-  }
-
-  code, .mono {
-    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.8em;
-    color: var(--text-muted);
-  }
-
+  const dashExtraCSS = `
   /* --- Header --- */
   .dash-header {
     padding: 2.5rem 3rem 2rem;
@@ -1371,11 +1326,9 @@ function generateDashboardHTML(data) {
     .agent-grid { grid-template-columns: 1fr; }
     .req-grid { grid-template-columns: 1fr; }
     .quick-tasks-grid { grid-template-columns: 1fr; }
-  }
-</style>
-</head>
-<body>
+  }`;
 
+  const dashBodyHTML = `
 <header class="dash-header">
   <h1>${esc(projectTitle)}</h1>
   <p class="subtitle">Generated ${timestamp} &middot; <code>${projectId}</code></p>
@@ -1496,9 +1449,9 @@ function generateDashboardHTML(data) {
       if (panel) panel.classList.add('active');
     });
   });
-<\/script>
-</body>
-</html>`;
+<\/script>`;
+
+  return wrapPage(`${projectTitle} - Dashboard`, dashBodyHTML, dashExtraCSS);
 }
 
 module.exports = {
