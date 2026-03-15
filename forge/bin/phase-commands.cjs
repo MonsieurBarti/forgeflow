@@ -1506,39 +1506,60 @@ module.exports = {
         return;
       }
 
-      // Apply edits
+      // Group design-field edits by taskId to avoid read-modify-write clobber
+      const designEdits = new Map(); // taskId -> { approach?, files_affected? }
+      const simpleEdits = [];
+
       for (const edit of edits) {
         const { taskId, field, value } = edit;
         if (!taskId || !field || value === undefined) continue;
         validateId(taskId);
 
+        if (field === 'approach' || field === 'files_affected') {
+          if (!designEdits.has(taskId)) designEdits.set(taskId, {});
+          designEdits.get(taskId)[field] = value;
+        } else {
+          simpleEdits.push(edit);
+        }
+      }
+
+      // Apply simple edits (title, description, acceptance_criteria)
+      let appliedCount = 0;
+      for (const { taskId, field, value } of simpleEdits) {
         if (field === 'title') {
           bdArgs(['update', taskId, `--title=${value}`]);
+          appliedCount++;
         } else if (field === 'description') {
           bdArgs(['update', taskId, `--description=${value}`]);
+          appliedCount++;
         } else if (field === 'acceptance_criteria') {
           bdArgs(['update', taskId, `--acceptance=${value}`]);
-        } else if (field === 'approach' || field === 'files_affected') {
-          // Merge into existing design JSON
-          const taskRaw = bdJsonArgs(['show', taskId]);
-          const task = Array.isArray(taskRaw) ? taskRaw[0] : taskRaw;
-          let design = task.design || null;
-          if (typeof design === 'string') {
-            try { design = JSON.parse(design); } catch { design = {}; }
-          }
-          if (!design) design = {};
-
-          if (field === 'approach') {
-            design.approach = value;
-          } else if (field === 'files_affected') {
-            // Value is newline-separated file paths
-            design.files_affected = value.split('\n')
-              .map(p => p.trim())
-              .filter(Boolean);
-          }
-
-          bdArgs(['update', taskId, `--design=${JSON.stringify(design)}`]);
+          appliedCount++;
         }
+      }
+
+      // Apply grouped design-field edits (single read-modify-write per task)
+      for (const [taskId, fields] of designEdits) {
+        const taskRaw = bdJsonArgs(['show', taskId]);
+        const task = Array.isArray(taskRaw) ? taskRaw[0] : taskRaw;
+        let design = task.design || null;
+        if (typeof design === 'string') {
+          try { design = JSON.parse(design); } catch { design = {}; }
+        }
+        if (!design) design = {};
+
+        if (fields.approach !== undefined) {
+          design.approach = fields.approach;
+        }
+        if (fields.files_affected !== undefined) {
+          // Sanitize paths: normalize, reject absolute and traversal paths
+          design.files_affected = fields.files_affected.split('\n')
+            .map(p => path.normalize(String(p).trim()))
+            .filter(p => p && !path.isAbsolute(p) && !p.startsWith('..'));
+        }
+
+        bdArgs(['update', taskId, `--design=${JSON.stringify(design)}`]);
+        appliedCount++;
       }
 
       // Apply comments
@@ -1558,10 +1579,13 @@ module.exports = {
 
       output({
         action: 'approve',
-        edits_applied: edits.length,
+        edits_applied: appliedCount,
         comments_applied: comments.length,
         removals_applied: removals.length,
       });
+    }).catch((err) => {
+      forgeError('SERVER_ERROR', `Plan review server failed: ${err.message}`,
+        'Retry or set web_ui=false to use the CLI fallback');
     });
   },
 };
@@ -1611,8 +1635,9 @@ function generatePlanReviewHTML(data) {
         ? task.files_affected.join('\n')
         : String(task.files_affected || '');
       const architectNotes = Array.isArray(task.architect_notes) ? task.architect_notes : [];
+      const complexityVariant = ['complex', 'medium'].includes(task.complexity) ? 'active' : 'pending';
       const complexityBadge = task.complexity
-        ? badge(task.complexity, task.complexity === 'high' ? 'active' : task.complexity === 'medium' ? 'active' : 'pending')
+        ? badge(task.complexity, complexityVariant)
         : '';
 
       const architectNotesHTML = architectNotes.length > 0
@@ -1666,9 +1691,11 @@ function generatePlanReviewHTML(data) {
           </div>
         </div>`;
 
+      // Build card header manually to avoid card()'s internal esc() double-escaping the badge HTML
+      const cardHeader = `<div class="plan-card-header">${esc(task.title || taskId)} <span class="plan-card-id">${esc(taskId)}</span> ${complexityBadge}</div>`;
+
       return card({
-        title: `${esc(taskId)} ${complexityBadge}`,
-        content: cardContent,
+        content: cardHeader + cardContent,
         className: 'plan-task-card',
       });
     }).join('\n');
@@ -1718,6 +1745,7 @@ function generatePlanReviewHTML(data) {
   // Track original values for dirty detection
   var originals = {};
   var editables = document.querySelectorAll('.plan-editable');
+  var commentEls = document.querySelectorAll('.plan-comment');
   editables.forEach(function(el) {
     var key = el.getAttribute('data-task') + ':' + el.getAttribute('data-field');
     originals[key] = el.value;
@@ -1758,7 +1786,7 @@ function generatePlanReviewHTML(data) {
       }
     });
 
-    document.querySelectorAll('.plan-comment').forEach(function(el) {
+    commentEls.forEach(function(el) {
       var taskId = el.getAttribute('data-task');
       var text = el.value.trim();
       if (text) {
@@ -1782,7 +1810,7 @@ function generatePlanReviewHTML(data) {
       if (el.value !== originals[key]) dirtyCount++;
     });
     var commentCount = 0;
-    document.querySelectorAll('.plan-comment').forEach(function(el) {
+    commentEls.forEach(function(el) {
       if (el.value.trim()) commentCount++;
     });
     var parts = [];
@@ -1795,7 +1823,7 @@ function generatePlanReviewHTML(data) {
   editables.forEach(function(el) {
     el.addEventListener('input', updateStatus);
   });
-  document.querySelectorAll('.plan-comment').forEach(function(el) {
+  commentEls.forEach(function(el) {
     el.addEventListener('input', updateStatus);
   });
 
@@ -1861,6 +1889,14 @@ function generatePlanReviewHTML(data) {
     border-color: var(--red);
   }
   .plan-task-fields { display: flex; flex-direction: column; gap: 12px; }
+  .plan-card-header {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .plan-card-id {
+    font-size: 11px; font-weight: 400; color: var(--text-muted);
+    font-family: monospace;
+  }
 
   /* Form fields */
   .plan-field { display: flex; flex-direction: column; gap: 4px; }
