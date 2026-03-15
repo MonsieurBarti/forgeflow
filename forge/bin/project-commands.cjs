@@ -17,6 +17,7 @@ const path = require('path');
 const os = require('os');
 const {
   bd, bdArgs, bdJson, output, forgeError, validateId, normalizeChildren,
+  collectMilestoneRequirements,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS,
   MODEL_PROFILES, ROLE_TO_AGENT,
@@ -2748,24 +2749,11 @@ module.exports = {
     const issues = normalizeChildren(bdJson(`children ${projectId}`));
     const milestones = issues.filter(i => (i.labels || []).includes('forge:milestone'));
 
-    // TODO(perf): N+1 subprocess -- calls bd children per milestone and per phase. Batch when bd CLI supports bulk queries.
+    // TODO(perf): N+1 subprocess -- calls bd children per milestone. Batch when bd CLI supports bulk queries.
     const result = milestones.map(m => {
       const mIssues = normalizeChildren(bdJson(`children ${m.id}`));
       const phases = mIssues.filter(i => (i.labels || []).includes('forge:phase'));
-      // Legacy fallback: reqs found as direct milestone children (old data)
-      const reqs = mIssues.filter(i => (i.labels || []).includes('forge:req'));
-      const seenReqIds = new Set(reqs.map(r => r.id));
-
-      // 3-level traversal: milestone -> phase -> req
-      for (const phase of phases) {
-        const phaseChildren = normalizeChildren(bdJson(`children ${phase.id}`));
-        for (const pc of phaseChildren) {
-          if (!seenReqIds.has(pc.id) && (pc.labels || []).includes('forge:req')) {
-            reqs.push(pc);
-            seenReqIds.add(pc.id);
-          }
-        }
-      }
+      const reqs = collectMilestoneRequirements(m.id);
 
       const closedPhases = phases.filter(p => p.status === 'closed');
       const closedReqs = reqs.filter(r => r.status === 'closed');
@@ -2810,20 +2798,7 @@ module.exports = {
 
     const issues = normalizeChildren(bdJson(`children ${milestoneId}`));
     const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
-    // Legacy fallback: reqs found as direct milestone children (old data)
-    const requirements = issues.filter(i => (i.labels || []).includes('forge:req'));
-    const seenReqIds = new Set(requirements.map(r => r.id));
-
-    // 3-level traversal: milestone -> phase -> req
-    for (const phase of phases) {
-      const phaseChildren = normalizeChildren(bdJson(`children ${phase.id}`));
-      for (const pc of phaseChildren) {
-        if (!seenReqIds.has(pc.id) && (pc.labels || []).includes('forge:req')) {
-          requirements.push(pc);
-          seenReqIds.add(pc.id);
-        }
-      }
-    }
+    const requirements = collectMilestoneRequirements(milestoneId);
 
     // TODO(perf): N+1 subprocess -- calls bd children per phase. Batch when bd CLI supports bulk queries.
     const phaseHealth = phases.map(phase => {
