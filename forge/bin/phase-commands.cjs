@@ -492,8 +492,16 @@ module.exports = {
       };
     });
 
+    // Tasks ready for verification: closed tasks OR in_progress tasks with EXECUTION_COMPLETE marker
+    const executionCompleteTasks = enrichedTasks.filter(
+      t => t.status === 'in_progress' && (t.notes || '').includes('EXECUTION_COMPLETE')
+    );
     const closedTasks = enrichedTasks.filter(t => t.status === 'closed');
-    const openTasks = enrichedTasks.filter(t => t.status !== 'closed');
+    const tasksToVerify = [...closedTasks, ...executionCompleteTasks];
+
+    // Tasks still open: exclude closed and exclude EXECUTION_COMPLETE tasks
+    const completedIds = new Set(tasksToVerify.map(t => t.id));
+    const openTasks = enrichedTasks.filter(t => !completedIds.has(t.id));
 
     const parentId = phase?.parent || null;
     let requirements = [];
@@ -507,7 +515,7 @@ module.exports = {
 
     output({
       phase: { id: phase?.id, title: phase?.title, status: phase?.status, parent: parentId },
-      tasks_to_verify: closedTasks,
+      tasks_to_verify: tasksToVerify,
       tasks_still_open: openTasks,
       total_tasks: tasks.length,
       total_closed: closedTasks.length,

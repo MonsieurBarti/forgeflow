@@ -169,7 +169,7 @@ Instructions:
    Example: feat(phase-abc12): add branch-create command [task xyz99]
    Use git add <specific files> — never git add . or git add -A
    NEVER run git merge or gh pr merge — merging is always left to the user
-5. Close the task: bd close <task-id> --reason='<brief summary of what was done>'
+5. Signal completion: bd update <task-id> --notes="EXECUTION_COMPLETE: <brief summary of what was done>"
 
 If you encounter a blocker:
 - bd update <task-id> --notes='BLOCKED: <description>'
@@ -179,7 +179,7 @@ If you encounter a blocker:
 ```
 
 **Single task** — execute it directly without spawning an agent (saves context overhead).
-Follow the same steps: claim, implement, verify, commit, close.
+Follow the same steps: claim, implement, verify, commit, signal completion.
 
 ### Wait for Wave Completion
 
@@ -194,7 +194,7 @@ PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
 
 Review the updated task statuses:
-- If all wave tasks closed successfully, proceed to the next wave
+- If all wave tasks signaled completion (EXECUTION_COMPLETE in notes) or are closed, proceed to the next wave
 - If any task is still open or marked BLOCKED, report the status and decide:
   - Skip and continue to next wave (if non-blocking)
   - Fix the issue inline (if quick)

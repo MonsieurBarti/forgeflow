@@ -83,6 +83,21 @@ Next steps:
 WARNING: Closing phase despite N failed task(s) -- --force override in effect.
 ```
 
+### Close Verified Tasks
+
+For each task that passed both automated and UAT verification, close it now.
+The verify workflow is the sole owner of task closure -- executors only signal completion.
+
+```bash
+bd close <task-id> --reason="Verified: <summary of verification outcome>"
+```
+
+Do NOT close tasks that failed verification. Failed tasks get reopened for rework:
+```bash
+bd reopen <task-id>
+bd update <task-id> --notes="Verification failed: <reason>"
+```
+
 ### Normal Closure (all verified or --force)
 
 All verified (or --force):
@@ -148,30 +163,56 @@ Re-run UAT only for tasks that passed in Step 3 but failed in re-verification (r
 
 Runs only when phase is being closed. Skip if blocked.
 
-**Derive counts:** `task_count` (verified + open), `blocker_count` (tasks with "BLOCKED" in notes), `forced` (--force flag).
+**Derive dynamic options from phase context:**
+- `completed_tasks`: titles of all verified/closed tasks from Step 2 (`tasks_to_verify`)
+- `blocked_tasks`: tasks whose notes contain "BLOCKED" (from `tasks_to_verify` and `tasks_still_open`)
 
-**Ask for effectiveness rating** via AskUserQuestion:
-- "How effective was the overall approach? Rate 1-5."
-- Options: "1 - Poor" / "2 - Below average" / "3 - Average" / "4 - Good" / "5 - Excellent"
+**Question 1 -- What went well** via AskUserQuestion (multiSelect: true):
+- Question: "What went well in this phase? Select all that apply."
+- Options:
+  - "Clean task execution"
+  - "Good acceptance criteria"
+  - "Effective parallel execution"
+  - One entry per completed task title: "Completed: <task-title>"
+  - "Other"
+  - "Nothing notable"
 
-**Ask for key lessons** via AskUserQuestion:
-- "Any key lessons learned? (Short sentence, or leave blank)"
-- Options: free text or "Skip"
+**Question 2 -- What did not go well** via AskUserQuestion (multiSelect: true):
+- Question: "What did not go well? Select all that apply."
+- Options:
+  - "Scope too large"
+  - "Unclear criteria"
+  - "Blockers delayed progress"
+  - "Verification found regressions"
+  - One entry per blocked task: "Blocked: <task-title> (<task-id>)"
+  - "Other"
+  - "Nothing notable"
 
-**Build context-write payload** (recognized fields: `agent`, `task`, `status`, `findings`, `decisions`, `blockers`, `artifacts`, `next_steps`):
-- **findings**: effectiveness rating, task count, lessons
-- **decisions**: "--force override" if used, else empty
-- **blockers**: one entry per blocked task if any
+**Question 3 -- Improvements for next time** via AskUserQuestion (multiSelect: true):
+- Question: "What improvements would you suggest? Select all that apply."
+- Options:
+  - "Smaller scope per phase"
+  - "Better acceptance criteria"
+  - "More upfront research"
+  - "Run tests earlier in the cycle"
+  - "Better dependency ordering"
+  - "Other"
+  - "No improvements needed"
+
+**Build context-write payload** from the 3 answers (recognized fields: `agent`, `task`, `status`, `findings`, `decisions`, `blockers`, `artifacts`, `next_steps`):
+- **findings**: all selected items from Question 1 (what went well)
+- **blockers**: all selected items from Question 2 (what didn't go well)
+- **decisions**: all selected items from Question 3 (improvements)
 
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> \
-  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: <N>/5","Task count: <N>","<lesson1>"],"decisions":["<if forced>"],"blockers":["<if any>"]}'
+  '{"agent":"forge-verifier","status":"completed","findings":["<went-well-1>","<went-well-2>"],"decisions":["<improvement-1>"],"blockers":["<didnt-go-well-1>"]}'
 ```
 
 Example:
 ```bash
 node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
-  '{"agent":"forge-verifier","status":"completed","findings":["Approach effectiveness: 4/5","Task count: 5","Parallel agents reduced wall time significantly"],"decisions":[],"blockers":["BLOCKED: Fix auth flow (task-xyz)"]}'
+  '{"agent":"forge-verifier","status":"completed","findings":["Clean task execution","Completed: Add retry logic"],"decisions":["Better acceptance criteria","Run tests earlier in the cycle"],"blockers":["Blockers delayed progress","Blocked: Fix auth flow (task-xyz)"]}'
 ```
 
 ## 9. Requirement Coverage Check
