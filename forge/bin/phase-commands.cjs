@@ -16,7 +16,7 @@ const path = require('path');
 const os = require('os');
 const {
   bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
-  collectMilestoneRequirements,
+  collectMilestoneRequirements, findGitRoot,
 } = require('./core.cjs');
 
 /**
@@ -30,10 +30,15 @@ const {
  *
  * @returns {{ build_cmds: string[], test_cmds: string[], config_source: string|null, has_tests: boolean }}
  */
+// Allowlist of safe command prefixes for memory-sourced commands
+const SAFE_CMD_PREFIXES = /^(npm|npx|yarn|pnpm|cargo|python|python3|pytest|make|go|bun|deno|ruby|bundle|rake|mvn|gradle|dotnet)\b/;
+
 function detectBuildTest() {
+  const root = findGitRoot(process.cwd()) || process.cwd();
+
   // --- Fast path: check bd memories ---
   const memRaw = bdArgs(['memories', 'forge:codebase:commands'], { allowFail: true });
-  if (memRaw && !memRaw.includes('No memories matching')) {
+  if (memRaw) {
     const buildCmds = [];
     const testCmds = [];
     // Memory text is freeform; extract lines mentioning build/test commands.
@@ -41,13 +46,12 @@ function detectBuildTest() {
     for (const line of lines) {
       const trimmed = line.trim().toLowerCase();
       if (/\bbuild\b/.test(trimmed)) {
-        // Extract the command portion after any colon or dash prefix
         const cmd = line.replace(/^[\s\-*]*(?:build\s*(?:command)?[:=]\s*)?/i, '').trim();
-        if (cmd) buildCmds.push(cmd);
+        if (cmd && SAFE_CMD_PREFIXES.test(cmd)) buildCmds.push(cmd);
       }
       if (/\btest\b/.test(trimmed)) {
         const cmd = line.replace(/^[\s\-*]*(?:test\s*(?:command)?[:=]\s*)?/i, '').trim();
-        if (cmd) testCmds.push(cmd);
+        if (cmd && SAFE_CMD_PREFIXES.test(cmd)) testCmds.push(cmd);
       }
     }
     if (buildCmds.length > 0 || testCmds.length > 0) {
@@ -60,29 +64,27 @@ function detectBuildTest() {
     }
   }
 
-  // --- Filesystem detection ---
+  // --- Filesystem detection (anchored to git root) ---
 
   // package.json
-  const pkgPath = path.join(process.cwd(), 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      const scripts = pkg.scripts || {};
-      const buildCmds = scripts.build ? [`npm run build`] : [];
-      const testCmds = scripts.test ? [`npm test`] : [];
-      return {
-        build_cmds: buildCmds,
-        test_cmds: testCmds,
-        config_source: 'package.json',
-        has_tests: testCmds.length > 0,
-      };
-    } catch {
-      // INTENTIONALLY SILENT: malformed package.json, fall through to next detector.
-    }
+  const pkgPath = path.join(root, 'package.json');
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    const scripts = pkg.scripts || {};
+    const buildCmds = scripts.build ? ['npm run build'] : [];
+    const testCmds = scripts.test ? ['npm test'] : [];
+    return {
+      build_cmds: buildCmds,
+      test_cmds: testCmds,
+      config_source: 'package.json',
+      has_tests: testCmds.length > 0,
+    };
+  } catch {
+    // INTENTIONALLY SILENT: missing or malformed package.json, fall through.
   }
 
   // Cargo.toml
-  const cargoPath = path.join(process.cwd(), 'Cargo.toml');
+  const cargoPath = path.join(root, 'Cargo.toml');
   if (fs.existsSync(cargoPath)) {
     return {
       build_cmds: ['cargo build'],
@@ -93,21 +95,19 @@ function detectBuildTest() {
   }
 
   // pyproject.toml
-  const pyprojectPath = path.join(process.cwd(), 'pyproject.toml');
-  if (fs.existsSync(pyprojectPath)) {
-    try {
-      const content = fs.readFileSync(pyprojectPath, 'utf8');
-      const hasPytest = /pytest/i.test(content);
-      const testCmds = hasPytest ? ['python -m pytest'] : ['python -m unittest discover'];
-      return {
-        build_cmds: [],
-        test_cmds: testCmds,
-        config_source: 'pyproject.toml',
-        has_tests: true,
-      };
-    } catch {
-      // INTENTIONALLY SILENT: malformed pyproject.toml, fall through.
-    }
+  const pyprojectPath = path.join(root, 'pyproject.toml');
+  try {
+    const content = fs.readFileSync(pyprojectPath, 'utf8');
+    const hasPytest = /pytest/i.test(content);
+    const testCmds = hasPytest ? ['python -m pytest'] : ['python -m unittest discover'];
+    return {
+      build_cmds: [],
+      test_cmds: testCmds,
+      config_source: 'pyproject.toml',
+      has_tests: true,
+    };
+  } catch {
+    // INTENTIONALLY SILENT: missing or malformed pyproject.toml, fall through.
   }
 
   // No config files found
