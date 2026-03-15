@@ -32,6 +32,7 @@ const SETTINGS_DEFAULTS = {
   parallel_execution: true,
   quality_gate: true,
   require_tests: true,
+  web_ui: true,
 };
 
 const SETTINGS_DESCRIPTIONS = {
@@ -43,6 +44,7 @@ const SETTINGS_DESCRIPTIONS = {
   parallel_execution: 'Execute independent tasks in parallel',
   quality_gate: 'Run pre-PR quality pipeline (security, code review, performance audits)',
   require_tests: 'Require test suite to exist; hard-fail verify if no tests detected',
+  web_ui: 'Use dev-server for interactive browser UIs in Phase 3+ workflows; when false, fall back to static HTML files and CLI prompts',
 };
 
 // --- Model Profile Table ---
