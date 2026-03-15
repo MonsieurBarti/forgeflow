@@ -6,13 +6,13 @@
  * Commands: milestone-cleanup-branches, milestone-close-beads, milestone-purge-memories
  */
 
-const { bd, bdArgs, bdJson, git, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
+const { bdArgs, bdJsonArgs, git, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
 
 /**
  * Collect all phase IDs that belong to a milestone.
  */
 function collectPhaseIds(milestoneId) {
-  const children = bdJson(`children ${milestoneId}`);
+  const children = bdJsonArgs(['children', milestoneId]);
   const all = normalizeChildren(children);
   return all
     .filter(b => (b.labels || []).includes('forge:phase'))
@@ -71,12 +71,12 @@ module.exports = {
     const deleted = [];
     const failed = [];
     for (const branch of targets) {
-      const result = git(['branch', '-d', branch], { allowFail: true });
+      const result = git(['branch', '-d', '--', branch], { allowFail: true });
       if (result !== '') {
         deleted.push(branch);
       } else {
         // allowFail returns '' on failure — check if branch still exists
-        const still = git(['branch', '--list', branch], { allowFail: true });
+        const still = git(['branch', '--list', '--', branch], { allowFail: true });
         if (still) {
           failed.push(branch);
         } else {
@@ -101,13 +101,13 @@ module.exports = {
     const dryRun = isDryRun(args);
 
     // Collect all beads under the milestone tree
-    const directChildren = normalizeChildren(bdJson(`children ${milestoneId}`));
+    const directChildren = normalizeChildren(bdJsonArgs(['children', milestoneId]));
     const allBeads = [...directChildren];
 
     // For each phase, also collect its children (tasks)
     const phases = directChildren.filter(b => (b.labels || []).includes('forge:phase'));
     for (const phase of phases) {
-      const phaseChildren = normalizeChildren(bdJson(`children ${phase.id}`));
+      const phaseChildren = normalizeChildren(bdJsonArgs(['children', phase.id]));
       allBeads.push(...phaseChildren);
     }
 
@@ -132,7 +132,7 @@ module.exports = {
         closed.push(bead.id);
       } else {
         // Check if it's actually closed now
-        const check = bdJson(`show ${bead.id}`);
+        const check = bdJsonArgs(['show', bead.id]);
         const item = Array.isArray(check) ? check[0] : check;
         if (item?.status === 'closed') {
           closed.push(bead.id);
@@ -161,80 +161,56 @@ module.exports = {
     const phaseIds = collectPhaseIds(milestoneId);
 
     // Get all memories as JSON
-    const allMemories = bdJson('memories');
+    const allMemories = bdJsonArgs(['memories']);
     if (!allMemories || typeof allMemories !== 'object') {
       return output({ dry_run: dryRun, keys: [], purged: [], failed: [], count: 0 });
     }
 
-    const allKeys = Object.keys(allMemories);
-    const targetKeys = [];
+    // Build target key prefixes/exact matches for efficient O(1) lookups
+    const checkpointKeys = new Set(phaseIds.map(id => `forge:checkpoint:${id}`));
+    const colonPrefixes = phaseIds.map(id => `forge:phase:${id}:`);
+    const slugPrefixes = phaseIds.map(id => `forge-phase-${id}-`);
+    const milestoneKeys = new Set([
+      `forge:milestone:${milestoneId}:goal`,
+      `forge:milestone:${milestoneId}:worktree`,
+    ]);
 
-    for (const key of allKeys) {
-      // Match checkpoint keys: forge:checkpoint:<phase-id>
-      for (const phaseId of phaseIds) {
-        if (key === `forge:checkpoint:${phaseId}`) {
-          targetKeys.push(key);
-          break;
-        }
+    const targetKeys = new Set();
+
+    for (const key of Object.keys(allMemories)) {
+      if (checkpointKeys.has(key) || milestoneKeys.has(key)) {
+        targetKeys.add(key);
+        continue;
       }
-
-      // Match phase memory keys (colon-style): forge:phase:<phase-id>:*
-      for (const phaseId of phaseIds) {
-        const prefix = `forge:phase:${phaseId}:`;
-        if (key.startsWith(prefix) && !targetKeys.includes(key)) {
-          targetKeys.push(key);
-          break;
-        }
+      if (colonPrefixes.some(p => key.startsWith(p)) || slugPrefixes.some(p => key.startsWith(p))) {
+        targetKeys.add(key);
+        continue;
       }
-
-      // Match phase memory keys (hyphenated-slug style from bd): forge-phase-<phase-id>-*
-      for (const phaseId of phaseIds) {
-        const prefix = `forge-phase-${phaseId}-`;
-        if (key.startsWith(prefix) && !targetKeys.includes(key)) {
-          targetKeys.push(key);
-          break;
-        }
-      }
-
-      // Match milestone-specific memory keys
-      if (key === `forge:milestone:${milestoneId}:goal` || key === `forge:milestone:${milestoneId}:worktree`) {
-        if (!targetKeys.includes(key)) {
-          targetKeys.push(key);
-        }
-      }
-
-      // Match session keys pointing to this milestone's phases
+      // Match session keys whose value references this milestone or its phases
       if (key.startsWith('forge:session:')) {
         const val = String(allMemories[key] || '');
-        for (const phaseId of phaseIds) {
-          if (val.includes(phaseId) || val.includes(milestoneId)) {
-            if (!targetKeys.includes(key)) {
-              targetKeys.push(key);
-            }
-            break;
-          }
+        if (val.includes(milestoneId) || phaseIds.some(id => val.includes(id))) {
+          targetKeys.add(key);
         }
       }
     }
 
+    const targetList = [...targetKeys];
+
     if (dryRun) {
-      return output({ dry_run: true, keys: targetKeys, count: targetKeys.length });
+      return output({ dry_run: true, keys: targetList, count: targetList.length });
     }
 
     const purged = [];
     const failed = [];
-    for (const key of targetKeys) {
-      const result = bd(`forget ${key}`, { allowFail: true });
-      if (result !== '') {
-        purged.push(key);
+    for (const key of targetList) {
+      bdArgs(['forget', key], { allowFail: true });
+      // Verify deletion by checking if key still exists
+      const check = bdArgs(['memories', key], { allowFail: true });
+      if (check && check.includes(key)) {
+        failed.push(key);
       } else {
-        // bd forget may return empty on success too — check if key still exists
-        const check = bd(`memories ${key}`, { allowFail: true });
-        if (check && check.includes(key)) {
-          failed.push(key);
-        } else {
-          purged.push(key);
-        }
+        purged.push(key);
       }
     }
 
