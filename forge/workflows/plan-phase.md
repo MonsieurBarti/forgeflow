@@ -650,16 +650,34 @@ If `estimated_cost_usd` is not null, display:
 
 If null or the command fails, skip silently.
 
-## 6.7. Implementation Preview & Approval Gate
+## 6.7. Interactive Plan Review & Approval Gate
 
-Generate a detailed implementation preview and present it to the user for approval before
-marking the phase as planned. This is a **hard gate** — the user must explicitly approve.
+Present the plan to the user for review and approval. This is a **hard gate** — the user
+must explicitly approve before the phase is marked as planned.
 
 ```bash
-PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" implementation-preview <phase-id>)
+RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" plan-interactive-review <phase-id>)
 ```
 
-Parse the JSON output. Format a human-readable summary grouped by execution wave:
+Parse the JSON output. The command handles two modes:
+
+### Interactive mode (web_ui=true)
+
+The command serves an interactive HTML page via the dev server where the user can:
+- Edit task fields (title, description, acceptance criteria, approach, files_affected)
+- Add reviewer comments to tasks
+- Remove tasks from the plan
+- Approve or reject the plan
+
+The command applies all mutations (edits, comments, removals) server-side via bd commands
+before returning. The result payload:
+- `{ action: "approve", edits_applied, comments_applied, removals_applied }` — proceed to step 7
+- `{ action: "reject" }` — stop the workflow
+
+### Fallback mode (web_ui=false)
+
+The command returns `{ fallback: true, data: <plan data> }`. In this case, format a
+human-readable summary from `data` grouped by execution wave:
 
 For each wave, show a table or structured list with per-task:
 - **Title** and task ID
@@ -677,9 +695,11 @@ Present via AskUserQuestion (single-select, not multiSelect):
   1. "Approve — start execution" (proceeds to step 7)
   2. "Reject — re-plan or adjust" (stops workflow)
 
-**On approval:** Proceed to step 7 (mark phase as planned).
+### On approval
+Proceed to step 7 (mark phase as planned).
 
-**On rejection:** Stop the workflow. Suggest:
+### On rejection
+Stop the workflow. Suggest:
 - `/forge:plan <phase> --skip-research` to re-plan with different decisions
 - Manual task edits via `bd update <task-id>` to adjust individual tasks
 
