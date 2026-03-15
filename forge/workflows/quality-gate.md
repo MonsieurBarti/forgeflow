@@ -1,9 +1,9 @@
 <purpose>
-Pre-PR quality pipeline. Orchestrates three audit agents (security, code review, performance)
-in parallel, collects their structured JSON findings, groups results by severity, presents them
-to the user for approval, creates fix tasks for approved findings, and dispatches approved fixes
-to domain-specific fixer agents (security-fixer, code-fixer, perf-fixer) in parallel.
-Capped at 1 round of fixes -- no recursive re-audit.
+Pre-PR quality pipeline. Orchestrates four audit agents (security, code review, performance,
+architect) in parallel, collects their structured JSON findings, groups results by severity,
+presents them to the user for approval, creates fix tasks for approved findings, and dispatches
+approved fixes to domain-specific fixer agents (security-fixer, code-fixer, perf-fixer) in
+parallel. Capped at 1 round of fixes -- no recursive re-audit.
 </purpose>
 
 <process>
@@ -23,13 +23,14 @@ Store the newline-separated file list for passing to each audit agent.
 
 ## 2. Resolve Models for Audit Agents
 
-Resolve the model for each of the three audit agents. All three resolve calls are independent
+Resolve the model for each of the four audit agents. All four resolve calls are independent
 and can run in parallel:
 
 ```bash
 MODEL_SECURITY=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-security-auditor --raw)
 MODEL_REVIEWER=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-code-reviewer --raw)
 MODEL_PERF=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-performance-auditor --raw)
+MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
 ```
 
 If a model resolves to empty, omit the `model` parameter from the Agent call for that agent
@@ -37,7 +38,7 @@ If a model resolves to empty, omit the `model` parameter from the Agent call for
 
 ## 3. Spawn Audit Agents in Parallel
 
-Spawn all three agents simultaneously using three Agent tool calls in the same response.
+Spawn all four agents simultaneously using four Agent tool calls in the same response.
 Pass each agent the list of changed files so they scope their analysis.
 
 **Security Auditor:**
@@ -79,6 +80,21 @@ Audit the following changed files for performance anti-patterns.
 
 Scope your analysis to these files only. Output your findings as raw JSON conforming to
 agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
+")
+```
+
+**Architect:**
+```
+Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
+Audit the following changed files for architectural violations and adherence issues.
+
+<changed_files>
+<CHANGED_FILES>
+</changed_files>
+
+Scope your analysis to these files only. Output your findings as raw JSON conforming to
+agents/schemas/audit-findings.md with subagent_type='forge-architect'.
+Do NOT wrap JSON in markdown fences.
 ")
 ```
 
@@ -135,12 +151,12 @@ function parseAuditResponse(agentName, rawText):
 
 ## 5. Handle Partial Agent Failure
 
-After parsing all three agent responses, check which succeeded and which failed.
+After parsing all four agent responses, check which succeeded and which failed.
 
-**If all three agents failed**: Report the failure and stop. Show the raw error for each agent
+**If all four agents failed**: Report the failure and stop. Show the raw error for each agent
 so the user can debug.
 
-**If 1 or 2 agents failed**: Continue with the results from agents that succeeded. Display a
+**If 1-3 agents failed**: Continue with the results from agents that succeeded. Display a
 warning listing which agents failed:
 
 ```
@@ -155,7 +171,7 @@ warning listing which agents failed:
 ------------------------------------------------------------
 ```
 
-**If all three agents succeeded**: Proceed normally with no warning.
+**If all four agents succeeded**: Proceed normally with no warning.
 
 ## 6. Load and Filter Known False-Positives
 
@@ -411,6 +427,10 @@ corresponding fixer agent:
 | security-auditor       | forge-security-fixer   |
 | code-reviewer          | forge-code-fixer       |
 | performance-auditor    | forge-perf-fixer       |
+| architect              | forge-code-fixer       |
+
+Architect findings batch to forge-code-fixer alongside code-reviewer findings, since
+architectural fixes are code refactors.
 
 Only spawn a fixer for groups that have at least one approved finding. If a group has
 zero findings, skip that fixer entirely. Spawn up to 3 fixer agents in parallel using
@@ -463,15 +483,16 @@ If a fix cannot be applied cleanly (e.g., conflicting changes, unclear remediati
 ")
 ```
 
-**Code Fixer** (if code review findings exist):
+**Code Fixer** (if code review or architect findings exist):
 ```
 Agent(subagent_type="forge-code-fixer", model="<MODEL_CODE_FIXER or omit>", prompt="
-Apply the following approved code quality fixes. Each fix was identified by the code-reviewer.
-Apply all fixes in a single pass, then create one atomic commit.
+Apply the following approved code quality and architectural fixes. Fixes were identified by
+the code-reviewer and/or forge-architect. Apply all fixes in a single pass, then create one
+atomic commit.
 
 Fixes to apply:
 
-<for each approved code review finding>
+<for each approved code review or architect finding>
 ## Fix <N>: <title>
 - File: <file>:<line>
 - Severity: <severity>
@@ -547,7 +568,7 @@ Report the final summary:
 ------------------------------------------------------------
  Quality Gate: Complete
 ------------------------------------------------------------
-Audit agents run:     <N successful> / 3
+Audit agents run:     <N successful> / 4
 Total findings:       <N total before FP filtering>
   False-positives filtered: <N>
   Blockers (crit/high): <N>

@@ -1,13 +1,14 @@
 ---
 name: forge:quality-gate
-description: Run pre-PR quality pipeline (security, code review, performance audits) with user-approval flow
+description: Run pre-PR quality pipeline (security, code review, performance, architecture audits) with user-approval flow
 allowed-tools: Read, Write, Edit, Bash, Grep, Glob, Agent, AskUserQuestion
 ---
 
 <objective>
-Run the pre-PR quality gate pipeline. Spawns three audit agents in parallel (security, code review,
-performance), collects findings, groups by severity, presents them to the user for approval, and
-auto-fixes approved findings via a fixer agent. Capped at 1 round of fixes.
+Run the pre-PR quality gate pipeline. Spawns four audit agents in parallel (security, code review,
+performance, architect), collects findings, groups by severity, presents them to the user for
+approval, and auto-fixes approved findings via domain-specific fixer agents. Capped at 1 round
+of fixes.
 </objective>
 
 <context>
@@ -22,14 +23,15 @@ When scoping changes (step 1), use:
 git diff main...HEAD --name-only
 ```
 
-When resolving models (step 2), resolve all three audit agent models:
+When resolving models (step 2), resolve all four audit agent models:
 ```bash
 MODEL_SECURITY=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-security-auditor --raw)
 MODEL_REVIEWER=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-code-reviewer --raw)
 MODEL_PERF=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-performance-auditor --raw)
+MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-architect --raw)
 ```
 
-When spawning audit agents (step 3), spawn all three Agent calls in the **same response** so
+When spawning audit agents (step 3), spawn all four Agent calls in the **same response** so
 they run in parallel. Pass the changed files list to each agent to scope their analysis.
 
 When parsing agent responses (step 4), apply tolerant JSON parsing: strip markdown fences,
