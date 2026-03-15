@@ -10,9 +10,11 @@ retrospective capture. Close verified work and update phase status.
 
 If a phase number was given, resolve it:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project
-node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>
+PROJECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" find-project)
+CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim <project-id>)
 ```
+Cache PROJECT and CONTEXT for reuse in later steps (e.g., step 9). Do NOT re-call these commands.
+
 Match phase number to ordered phases list. If a phase ID was given, use it directly. If no argument, find the current phase (most recent closed or in_progress).
 
 ## 2. Load Tasks with Acceptance Criteria
@@ -174,7 +176,7 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write phase-abc123 \
 
 ## 9. Requirement Coverage Check
 
-> Reuse project context from Step 1.
+> Reuse the cached project-context-slim data from Step 1 to identify the parent milestone.
 
 Identify parent milestone. If none, skip silently.
 
@@ -183,6 +185,7 @@ If milestone found, fetch forge:req beads:
 bd dep list <milestone-id> --type contains --json
 ```
 
+<!-- Known N+1 pattern: per-requirement bd dep list calls. Pending bd CLI batch query support. -->
 For each req, check validates links from this phase's tasks:
 ```bash
 bd dep list <req-id> --type validates --json
