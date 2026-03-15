@@ -25,14 +25,6 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-### Cost Baseline
-
-Record the starting cost baseline for this phase so subsequent snapshots can compute deltas:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
-```
-If the bridge file is missing, this outputs a warning but does not block execution.
-
 ## 1.5. Snapshot Starting Cost
 
 Record cost baseline at phase start for token/cost tracking:

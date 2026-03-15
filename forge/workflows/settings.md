@@ -182,7 +182,7 @@ Quick overrides:
 
 <success_criteria>
 - [ ] Current settings loaded from all layers
-- [ ] User presented with 9 workflow toggles (7 boolean + 1 shift-left boolean + 1 shift-left enum)
+- [ ] User presented with 9 workflow toggles (8 boolean + 1 enum)
 - [ ] User chose save scope (project/global/both)
 - [ ] Settings saved to chosen scope(s)
 - [ ] Final effective settings displayed with sources

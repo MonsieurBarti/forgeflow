@@ -1476,12 +1476,12 @@ function generateDashboardHTML(data) {
  * Set a (possibly nested) key on a settings object.
  * Supports dot-notation keys via parseDotKey (topKey, subKey).
  */
-function setNestedKey(obj, tKey, sKey, val) {
-  if (sKey) {
-    if (!obj[tKey] || typeof obj[tKey] !== 'object') obj[tKey] = {};
-    obj[tKey][sKey] = val;
+function setNestedKey(obj, topKey, subKey, val) {
+  if (subKey) {
+    if (!obj[topKey] || typeof obj[topKey] !== 'object') obj[topKey] = {};
+    obj[topKey][subKey] = val;
   } else {
-    obj[tKey] = val;
+    obj[topKey] = val;
   }
 }
 
@@ -1489,12 +1489,12 @@ function setNestedKey(obj, tKey, sKey, val) {
  * Clear a (possibly nested) key from a settings object.
  * Removes empty parent objects after clearing a sub-key.
  */
-function clearNestedKey(obj, tKey, sKey) {
-  if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
-    delete obj[tKey][sKey];
-    if (Object.keys(obj[tKey]).length === 0) delete obj[tKey];
+function clearNestedKey(obj, topKey, subKey) {
+  if (subKey && obj[topKey] && typeof obj[topKey] === 'object') {
+    delete obj[topKey][subKey];
+    if (Object.keys(obj[topKey]).length === 0) delete obj[topKey];
   } else {
-    delete obj[tKey];
+    delete obj[topKey];
   }
 }
 
@@ -1913,7 +1913,7 @@ function generateInteractiveDashboardHTML(data) {
   }
 
   // Initial render
-  var initialData = ${JSON.stringify(data)};
+  var initialData = ${JSON.stringify(data).replace(/<\/script>/gi, '<\\/script>')};
   renderDashboard(initialData);
 
   // Refresh button with 30s throttle
