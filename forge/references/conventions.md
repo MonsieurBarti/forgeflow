@@ -166,6 +166,12 @@ bd forget forge:session:notes
 
 Use `/forge:memories` to browse all stored memories grouped by type.
 
+## Code Navigation
+
+For AST-aware code navigation (symbol definitions, references, impact analysis), see
+`forge/references/code-graph.md`. When `code-graph` is installed, agents MUST use it
+for structural queries. When absent, agents silently fall back to Grep/Glob.
+
 ## Querying Patterns
 
 ```bash

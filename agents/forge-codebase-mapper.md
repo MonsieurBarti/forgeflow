@@ -55,6 +55,10 @@ Explore thoroughly, write documents directly, return confirmation only.
 **Prescriptive, not descriptive.** "Use X pattern" > "X pattern is used."
 </philosophy>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <process>
 
 <step name="parse_focus">
@@ -76,6 +80,7 @@ grep -r "import.*stripe\|import.*supabase\|import.*aws\|import.*@" src/ --includ
 ```bash
 find . -type d -not -path '*/node_modules/*' -not -path '*/.git/*' | head -50
 ls src/index.* src/main.* src/app.* src/server.* app/page.* 2>/dev/null
+# Fallback for code-graph refs — prefer code-graph stats + refs when available
 grep -r "^import" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | head -100
 ```
 
@@ -84,23 +89,23 @@ grep -r "^import" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | head -10
 ls .eslintrc* .prettierrc* eslint.config.* biome.json 2>/dev/null
 cat .prettierrc 2>/dev/null
 ls jest.config.* vitest.config.* 2>/dev/null
-find . -name "*.test.*" -o -name "*.spec.*" | head -30
+find . \( -name "*.test.*" -o -name "*.spec.*" \) -not -path '*/node_modules/*' -not -path '*/.git/*' | head -30
 ls src/**/*.ts 2>/dev/null | head -10
 ```
 
 **concerns:**
 ```bash
 grep -rn "TODO\|FIXME\|HACK\|XXX" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | head -50
-find src/ -name "*.ts" -o -name "*.tsx" | xargs wc -l 2>/dev/null | sort -rn | head -20
+find src/ \( -name "*.ts" -o -name "*.tsx" \) -not -path '*/node_modules/*' | xargs wc -l 2>/dev/null | sort -rn | head -20
 grep -rn "return null\|return \[\]\|return {}" src/ --include="*.ts" --include="*.tsx" 2>/dev/null | head -30
 ```
 
 Read key files identified during exploration.
-</step>
 
-<code_navigation>
-@forge/references/code-graph.md
-</code_navigation>
+> **Note:** The commands above are code-graph fallbacks. When `code-graph` is available,
+> prefer `code-graph stats`, `code-graph find`, `code-graph refs` for structural queries.
+> See the `<code_navigation>` section above.
+</step>
 
 <step name="write_documents">
 Write to `.forge/codebase/` using templates below. UPPERCASE.md naming.

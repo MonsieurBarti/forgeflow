@@ -254,6 +254,10 @@ Autonomous investigation. Update bead continuously.
 - **ELIMINATED:** Append to Eliminated, form new hypothesis, return to Phase 2.
 
 After 5+ evidence entries, suggest "/clear - run /forge:debug to resume" if context filling up.
+
+**Hard ceiling:** After 10 eliminated hypotheses with no confirmation, stop autonomous
+investigation. Transition to a CHECKPOINT REACHED response listing all eliminated theories
+and remaining hypotheses, requesting user guidance rather than generating new hypotheses.
 </step>
 
 <step name="return_diagnosis">
