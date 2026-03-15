@@ -196,5 +196,4 @@ Report:
 <parallel_safety>
 Safe to run concurrently -- test execution and coverage are read-only against source,
 generated test files use unique paths scoped to the target, and diagnose is pure analysis.
-If tests share mutable state (DB, filesystem), note potential interference in results.
 </parallel_safety>
