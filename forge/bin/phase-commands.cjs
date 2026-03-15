@@ -196,6 +196,40 @@ function computeWaves(tasks, taskDeps) {
 }
 
 /**
+ * Build intra-phase task dependency map for a set of tasks.
+ * Calls bd dep list per task and filters to deps within the same phase
+ * that are not yet closed. Used by both detect-waves and implementation-preview.
+ *
+ * @param {Array} tasks - array of task objects with .id and .status
+ * @param {Set} phaseTaskIds - Set of task IDs in this phase
+ * @param {Map} taskById - Map from task ID to task object
+ * @returns {Object} taskDeps map: taskId -> array of blocking intra-phase dep IDs
+ */
+function buildIntraPhaseTaskDeps(tasks, phaseTaskIds, taskById) {
+  // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
+  const taskDeps = {};
+  for (const task of tasks) {
+    const depsRaw = bdArgs(['dep', 'list', task.id, '--type', 'blocks', '--json'], { allowFail: true });
+    let deps = [];
+    if (depsRaw) {
+      // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
+      // the fallback to empty array is the correct behavior.
+      try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
+    }
+    if (!Array.isArray(deps)) deps = [];
+    const intraPhaseDeps = deps
+      .filter(d => phaseTaskIds.has(d.id || d.dependency_id || d))
+      .map(d => d.id || d.dependency_id || d)
+      .filter(id => {
+        const depTask = taskById.get(id);
+        return depTask && depTask.status !== 'closed';
+      });
+    taskDeps[task.id] = intraPhaseDeps;
+  }
+  return taskDeps;
+}
+
+/**
  * Read phase comments, parse JSON entries, and return context entries.
  *
  * Iterates over phase bead comments, silently skips non-JSON entries, and
@@ -490,26 +524,7 @@ module.exports = {
     const phaseTaskIds = new Set(tasks.map(t => t.id));
     const taskById = new Map(tasks.map(t => [t.id, t]));
 
-    // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
-    const taskDeps = {};
-    for (const task of tasks) {
-      const depsRaw = bdArgs(['dep', 'list', task.id, '--type', 'blocks', '--json'], { allowFail: true });
-      let deps = [];
-      if (depsRaw) {
-        // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
-        // the fallback to empty array is the correct behavior.
-        try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
-      }
-      if (!Array.isArray(deps)) deps = [];
-      const intraPhaseDeps = deps
-        .filter(d => phaseTaskIds.has(d.id || d.dependency_id || d))
-        .map(d => d.id || d.dependency_id || d)
-        .filter(id => {
-          const depTask = taskById.get(id);
-          return depTask && depTask.status !== 'closed';
-        });
-      taskDeps[task.id] = intraPhaseDeps;
-    }
+    const taskDeps = buildIntraPhaseTaskDeps(tasks, phaseTaskIds, taskById);
 
     // Delegate wave computation to shared helper (Kahn's algorithm, O(V+E))
     const rawWaves = computeWaves(tasks, taskDeps);
@@ -794,9 +809,22 @@ module.exports = {
       forgeError('INVALID_INPUT', `Invalid phase number: ${afterPhaseArg}`, 'Provide a numeric phase number. List phases with: forge-tools list-phases <project-id>');
     }
 
-    const children = bdJsonArgs(['children', projectId]);
-    const issues = normalizeChildren(children);
-    const phases = issues.filter(i => (i.labels || []).includes('forge:phase'));
+    // --- Find phases: try direct children of project first, then search milestone children ---
+    let phases = [];
+    const directChildren = bdJsonArgs(['children', projectId]);
+    const directIssues = normalizeChildren(directChildren);
+    phases = directIssues.filter(i => (i.labels || []).includes('forge:phase'));
+
+    if (phases.length === 0) {
+      // No phases directly under project -- search milestones
+      const milestones = directIssues.filter(i => (i.labels || []).includes('forge:milestone'));
+      for (const ms of milestones) {
+        const msChildren = bdJsonArgs(['children', ms.id]);
+        const msIssues = normalizeChildren(msChildren);
+        const msPhases = msIssues.filter(i => (i.labels || []).includes('forge:phase'));
+        phases = phases.concat(msPhases);
+      }
+    }
 
     let targetPhase = null;
     for (const phase of phases) {
@@ -809,6 +837,29 @@ module.exports = {
 
     if (!targetPhase) {
       forgeError('NOT_FOUND', `Phase ${afterPhaseNum} not found in project`, 'List available phases with: forge-tools list-phases <project-id>', { projectId, phaseNumber: afterPhaseNum });
+    }
+
+    // --- Auto-detect parent milestone by walking parent-child deps from afterPhase ---
+    // direction=down returns the bead's own parent-child dependencies (i.e. its parent).
+    let parentId = projectId; // fallback: wire to project if no milestone found
+    const parentDeps = bdJsonArgs(['dep', 'list', targetPhase.id, '--direction=down', '--type=parent-child']);
+    if (Array.isArray(parentDeps)) {
+      for (const dep of parentDeps) {
+        const ancestorId = dep.id;
+        if (!ancestorId) continue;
+        const ancestor = bdJsonArgs(['show', ancestorId]);
+        if (ancestor && (ancestor.labels || []).includes('forge:milestone')) {
+          parentId = ancestorId;
+          break;
+        }
+      }
+    }
+
+    // Re-query phases from the detected parent for accurate sibling enumeration
+    if (parentId !== projectId) {
+      const parentChildren = bdJsonArgs(['children', parentId]);
+      const parentIssues = normalizeChildren(parentChildren);
+      phases = parentIssues.filter(i => (i.labels || []).includes('forge:phase'));
     }
 
     let maxDecimal = 0;
@@ -835,7 +886,7 @@ module.exports = {
       forgeError('COMMAND_FAILED', 'Failed to create phase bead', 'Check bd connectivity with: bd list --limit 1');
     }
 
-    bdArgs(['dep', 'add', created.id, projectId, '--type=parent-child']);
+    bdArgs(['dep', 'add', created.id, parentId, '--type=parent-child']);
     bdArgs(['label', 'add', created.id, 'forge:phase']);
     bdArgs(['dep', 'add', created.id, targetPhase.id]);
 
@@ -862,6 +913,7 @@ module.exports = {
       title,
       description,
       project_id: projectId,
+      milestone_id: parentId !== projectId ? parentId : null,
       rewired_next: nextPhase ? { id: nextPhase.id, title: nextPhase.title } : null,
     });
   },
@@ -1276,6 +1328,8 @@ module.exports = {
         try { design = JSON.parse(design); } catch { design = null; }
       }
       // Normalize file paths: reject absolute paths and path traversal sequences.
+      // NOTE: These paths are display-only (used in implementation-preview output).
+      // They are never used for file I/O, so path.normalize() without path.resolve() is intentional.
       const rawPaths = (design && Array.isArray(design.files_affected)) ? design.files_affected : [];
       const safePaths = rawPaths
         .map(p => path.normalize(String(p)))
@@ -1313,26 +1367,7 @@ module.exports = {
     const phaseTaskIds = new Set(tasks.map(t => t.id));
     const taskById = new Map(tasks.map(t => [t.id, t]));
 
-    // TODO(perf): N+1 subprocess -- calls bd dep list per task. Needs bd CLI batch-query support.
-    const taskDeps = {};
-    for (const task of tasks) {
-      const depsRaw = bdArgs(['dep', 'list', task.id, '--type', 'blocks', '--json'], { allowFail: true });
-      let deps = [];
-      if (depsRaw) {
-        // INTENTIONALLY SILENT: bd dep list may return non-JSON when no deps exist;
-        // the fallback to empty array is the correct behavior.
-        try { deps = JSON.parse(depsRaw); } catch { /* allowFail JSON parse fallback */ }
-      }
-      if (!Array.isArray(deps)) deps = [];
-      const intraPhaseDeps = deps
-        .filter(d => phaseTaskIds.has(d.id || d.dependency_id || d))
-        .map(d => d.id || d.dependency_id || d)
-        .filter(id => {
-          const depTask = taskById.get(id);
-          return depTask && depTask.status !== 'closed';
-        });
-      taskDeps[task.id] = intraPhaseDeps;
-    }
+    const taskDeps = buildIntraPhaseTaskDeps(tasks, phaseTaskIds, taskById);
 
     // Enrich waves with implementation-preview specific fields after wave computation
     const waves = computeWaves(tasks, taskDeps).map(w => ({

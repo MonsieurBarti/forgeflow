@@ -310,6 +310,8 @@ node \"$HOME/.claude/forge/bin/forge-tools.cjs\" context-write <phase-id> '{
   \"agent\": \"forge-architect\",
   \"status\": \"completed\",
   \"findings\": [
+    // Note: forge-architect uses its own severity taxonomy (suggestion/concern), which is
+    // separate from the audit findings schema (critical/high/medium/low/info).
     { \"task\": \"<task-id>\", \"severity\": \"suggestion\"|\"concern\", \"description\": \"...\", \"recommendation\": \"...\" }
   ],
   \"summary\": \"<one-line overall architectural assessment>\"
@@ -335,6 +337,11 @@ Resolve the model:
 MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model forge-plan-checker --raw)
 ```
 
+Gather project context for the checker:
+```bash
+SLIM=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" project-context-slim "<project-id>")
+```
+
 Spawn a **forge-plan-checker** agent:
 
 ```
@@ -343,6 +350,7 @@ Verify the plan for this phase:
 
 Phase ID: <phase-id>
 Project ID: <project-id>
+Project context: <SLIM output>
 
 Check:
 1. Every task has specific, testable acceptance criteria

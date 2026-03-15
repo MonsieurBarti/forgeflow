@@ -25,6 +25,7 @@ const {
   resolveAgentModel, loadModelProfile, loadModelOverrides,
   findGitRoot,
 } = require('./core.cjs');
+const { esc, CSS_VARS, wrapPage } = require('./design-system.cjs');
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -643,12 +644,8 @@ function collectAgentRoster() {
   return agents;
 }
 
-// generateDashboardHTML and esc are inlined here since they are only used in generate-dashboard.
-
-function esc(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
+// TODO: generateDashboardHTML is ~810 lines. Break into smaller helpers (CSS builder,
+// section renderers, page assembler) in a future phase to improve maintainability.
 function generateDashboardHTML(data) {
   const {
     projectTitle, projectId, timestamp, progressPercent,
@@ -814,47 +811,7 @@ function generateDashboardHTML(data) {
   const reqRingPct = reqsTotal > 0 ? Math.round((reqsCovered / reqsTotal) * 100) : 0;
   const circumference = Math.round(2 * Math.PI * 54);
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(projectTitle)} - Dashboard</title>
-<style>
-  :root {
-    --bg: #09090b;
-    --surface: rgba(255,255,255,0.03);
-    --surface-solid: #111113;
-    --surface-2: rgba(255,255,255,0.06);
-    --surface-hover: rgba(255,255,255,0.08);
-    --border: rgba(255,255,255,0.06);
-    --border-subtle: rgba(255,255,255,0.04);
-    --text: #fafafa;
-    --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
-    --accent: #6366f1;
-    --green: #22c55e;
-    --orange: #f59e0b;
-    --red: #ef4444;
-    --blue: #3b82f6;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-    min-height: 100vh;
-  }
-
-  code, .mono {
-    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.8em;
-    color: var(--text-muted);
-  }
-
+  const dashExtraCSS = `
   /* --- Header --- */
   .dash-header {
     padding: 2.5rem 3rem 2rem;
@@ -1371,11 +1328,9 @@ function generateDashboardHTML(data) {
     .agent-grid { grid-template-columns: 1fr; }
     .req-grid { grid-template-columns: 1fr; }
     .quick-tasks-grid { grid-template-columns: 1fr; }
-  }
-</style>
-</head>
-<body>
+  }`;
 
+  const dashBodyHTML = `
 <header class="dash-header">
   <h1>${esc(projectTitle)}</h1>
   <p class="subtitle">Generated ${timestamp} &middot; <code>${projectId}</code></p>
@@ -1496,10 +1451,69 @@ function generateDashboardHTML(data) {
       if (panel) panel.classList.add('active');
     });
   });
-<\/script>
-</body>
-</html>`;
+<\/script>`;
+
+  return wrapPage(`${projectTitle} - Dashboard`, dashBodyHTML, dashExtraCSS);
 }
+
+/**
+ * Set a (possibly nested) key on a settings object.
+ * Supports dot-notation keys via parseDotKey (topKey, subKey).
+ */
+function setNestedKey(obj, tKey, sKey, val) {
+  if (sKey) {
+    if (!obj[tKey] || typeof obj[tKey] !== 'object') obj[tKey] = {};
+    obj[tKey][sKey] = val;
+  } else {
+    obj[tKey] = val;
+  }
+}
+
+/**
+ * Clear a (possibly nested) key from a settings object.
+ * Removes empty parent objects after clearing a sub-key.
+ */
+function clearNestedKey(obj, tKey, sKey) {
+  if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
+    delete obj[tKey][sKey];
+    if (Object.keys(obj[tKey]).length === 0) delete obj[tKey];
+  } else {
+    delete obj[tKey];
+  }
+}
+
+/**
+ * Read, parse, mutate, and write a settings file in one call.
+ * Handles both global (frontmatter) and project (simple YAML) formats.
+ *
+ * @param {'global'|'project'} scope
+ * @param {string} filePath - absolute path to the settings file
+ * @param {function(object): void} mutatorFn - receives the parsed settings object; mutate in place
+ */
+function mutateSettingsFile(scope, filePath, mutatorFn) {
+  if (scope === 'global') {
+    let existing = {};
+    let body = '';
+    try {
+      const text = fs.readFileSync(filePath, 'utf8');
+      existing = parseFrontmatter(text);
+      const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
+      if (bodyMatch) body = bodyMatch[1];
+    } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
+    mutatorFn(existing);
+    writeFrontmatter(filePath, existing, body);
+  } else {
+    let existing = {};
+    try {
+      existing = parseSimpleYaml(fs.readFileSync(filePath, 'utf8'));
+    } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
+    mutatorFn(existing);
+    const dir = require('path').dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(filePath, toSimpleYaml(existing));
+  }
+}
+
 
 module.exports = {
   /**
@@ -1694,8 +1708,8 @@ module.exports = {
       phases_in_progress: inProgress,
     };
     // Intentionally compact (not pretty-printed) to minimise token payload — do not switch to output()
-    const line = (o) => JSON.stringify(o);
-    const out = `{"project":${line(projectSlim)},"requirements":[${reqSlim.map(line).join(',')}],"phases":[${phaseSlim.map(line).join(',')}],"summary":${line(summary)}}`;
+    const toJsonLine = (o) => JSON.stringify(o);
+    const out = `{"project":${toJsonLine(projectSlim)},"requirements":[${reqSlim.map(toJsonLine).join(',')}],"phases":[${phaseSlim.map(toJsonLine).join(',')}],"summary":${toJsonLine(summary)}}`;
     process.stdout.write(out + '\n');
   },
 
@@ -2327,37 +2341,9 @@ module.exports = {
 
     const parsedValue = coerceBool(value);
 
-    function setNestedKey(obj, tKey, sKey, val) {
-      if (sKey) {
-        if (!obj[tKey] || typeof obj[tKey] !== 'object') obj[tKey] = {};
-        obj[tKey][sKey] = val;
-      } else {
-        obj[tKey] = val;
-      }
-    }
-
-    if (scope === 'global') {
-      let existing = {};
-      let body = '';
-      try {
-        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-        existing = parseFrontmatter(text);
-        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-        if (bodyMatch) body = bodyMatch[1];
-      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
-      setNestedKey(existing, topKey, subKey, parsedValue);
-      writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-      output({ ok: true, scope, key, value: parsedValue });
-    } else if (scope === 'project') {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      let existing = {};
-      try {
-        existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
-      setNestedKey(existing, topKey, subKey, parsedValue);
-      const dir = path.dirname(projectPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(projectPath, toSimpleYaml(existing));
+    if (scope === 'global' || scope === 'project') {
+      const filePath = scope === 'global' ? GLOBAL_SETTINGS_PATH : path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      mutateSettingsFile(scope, filePath, (existing) => { setNestedKey(existing, topKey, subKey, parsedValue); });
       output({ ok: true, scope, key, value: parsedValue });
     } else {
       forgeError('INVALID_INPUT', `Invalid scope: ${scope}`, 'Scope must be "global" or "project"', { scope });
@@ -2377,30 +2363,10 @@ module.exports = {
 
     const { topKey, subKey } = parseDotKey(key);
 
-    function clearNestedKey(obj, tKey, sKey) {
-      if (sKey && obj[tKey] && typeof obj[tKey] === 'object') {
-        delete obj[tKey][sKey];
-        if (Object.keys(obj[tKey]).length === 0) delete obj[tKey];
-      } else {
-        delete obj[tKey];
-      }
-    }
-
-    if (scope === 'global') {
+    if (scope === 'global' || scope === 'project') {
+      const filePath = scope === 'global' ? GLOBAL_SETTINGS_PATH : path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       try {
-        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-        const existing = parseFrontmatter(text);
-        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-        const body = bodyMatch ? bodyMatch[1] : '';
-        clearNestedKey(existing, topKey, subKey);
-        writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-      } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
-    } else if (scope === 'project') {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      try {
-        const existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-        clearNestedKey(existing, topKey, subKey);
-        fs.writeFileSync(projectPath, toSimpleYaml(existing));
+        mutateSettingsFile(scope, filePath, (existing) => { clearNestedKey(existing, topKey, subKey); });
       } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     }
 
@@ -2427,37 +2393,16 @@ module.exports = {
 
     const results = [];
 
-    if (scope === 'global') {
-      let existing = {};
-      let body = '';
-      try {
-        const text = fs.readFileSync(GLOBAL_SETTINGS_PATH, 'utf8');
-        existing = parseFrontmatter(text);
-        const bodyMatch = text.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
-        if (bodyMatch) body = bodyMatch[1];
-      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
-      for (const [key, value] of Object.entries(updates)) {
-        if (!(key in SETTINGS_DEFAULTS)) continue;
-        const parsedValue = coerceBool(value);
-        existing[key] = parsedValue;
-        results.push({ key, value: parsedValue });
-      }
-      writeFrontmatter(GLOBAL_SETTINGS_PATH, existing, body);
-    } else if (scope === 'project') {
-      const projectPath = path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
-      let existing = {};
-      try {
-        existing = parseSimpleYaml(fs.readFileSync(projectPath, 'utf8'));
-      } catch { /* INTENTIONALLY SILENT: file may not exist yet; will be created below */ }
-      for (const [key, value] of Object.entries(updates)) {
-        if (!(key in SETTINGS_DEFAULTS)) continue;
-        const parsedValue = coerceBool(value);
-        existing[key] = parsedValue;
-        results.push({ key, value: parsedValue });
-      }
-      const dir = path.dirname(projectPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(projectPath, toSimpleYaml(existing));
+    if (scope === 'global' || scope === 'project') {
+      const filePath = scope === 'global' ? GLOBAL_SETTINGS_PATH : path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
+      mutateSettingsFile(scope, filePath, (existing) => {
+        for (const [key, value] of Object.entries(updates)) {
+          if (!(key in SETTINGS_DEFAULTS)) continue;
+          const parsedValue = coerceBool(value);
+          existing[key] = parsedValue;
+          results.push({ key, value: parsedValue });
+        }
+      });
     }
 
     output({ ok: true, scope, updated: results });

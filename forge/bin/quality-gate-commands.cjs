@@ -15,6 +15,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { bd, bdArgs, output, forgeError } = require('./core.cjs');
+const { esc, CSS_VARS, wrapPage } = require('./design-system.cjs');
 
 const FP_KEY_PREFIX = 'forge:quality-gate:fp:';
 
@@ -240,6 +241,10 @@ module.exports = {
     // cmd.exe /c start instead; the empty '' arg is the window title.
     try {
       if (process.platform === 'win32') {
+        // Validate reportPath is within os.tmpdir() before passing to cmd.exe.
+        if (!reportPath.startsWith(os.tmpdir())) {
+          throw new Error('reportPath is outside os.tmpdir() -- refusing to open');
+        }
         execFileSync('cmd.exe', ['/c', 'start', '', reportPath], { stdio: 'ignore' });
       } else {
         const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
@@ -258,10 +263,6 @@ module.exports = {
 
 // --- HTML report generator (inlined, only used by quality-gate-report) ---
 
-function escHtml(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 const SEVERITY_COLORS = {
   critical: { bg: '#3b1219', border: '#f87171', text: '#fca5a5', badge: '#dc2626' },
   high:     { bg: '#3b1e0b', border: '#fb923c', text: '#fdba74', badge: '#ea580c' },
@@ -270,6 +271,8 @@ const SEVERITY_COLORS = {
   info:     { bg: '#1a1a2e', border: '#6b7280', text: '#9ca3af', badge: '#4b5563' },
 };
 
+// TODO: generateReportHTML (~240 lines) interleaves data transformation, CSS construction,
+// and HTML assembly. Separate into distinct helpers in a future phase to improve readability.
 function generateReportHTML({ agents, findings, filteredFps, changedFiles, summary, totalFindings, hasBlockers, passed, timestamp }) {
   const blockerFindings = [];
   const advisoryFindings = [];
@@ -291,26 +294,26 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
     agentFindings.sort((a, b) => (sevOrder[a.severity] || 5) - (sevOrder[b.severity] || 5));
 
     const findingsHTML = agentFindings.map((f) => {
-      const c = SEVERITY_COLORS[f.severity] || SEVERITY_COLORS.info;
+      const sev = f.severity || 'info';
       return `
-        <div class="finding" style="border-left:3px solid ${c.border};background:${c.bg};padding:12px 16px;border-radius:6px;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span class="sev-badge" style="background:${c.badge};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase">${escHtml(f.severity)}</span>
-            <span style="color:${c.text};font-weight:500">${escHtml(f.title)}</span>
+        <div class="finding finding-${sev}">
+          <div class="finding-header">
+            <span class="sev-badge sev-${sev}">${esc(f.severity)}</span>
+            <span class="finding-title finding-title-${sev}">${esc(f.title)}</span>
           </div>
-          <div style="color:#a1a1aa;font-size:13px;margin-bottom:4px">${escHtml(f.file)}${f.line ? ':' + f.line : ''} &middot; ${escHtml(f.category)}</div>
-          <div style="color:#d4d4d8;font-size:13px;margin-bottom:6px">${escHtml(f.description)}</div>
-          <div style="color:#86efac;font-size:13px"><strong>Fix:</strong> ${escHtml(f.remediation)}</div>
+          <div class="finding-location">${esc(f.file)}${f.line ? ':' + f.line : ''} &middot; ${esc(f.category)}</div>
+          <div class="finding-desc">${esc(f.description)}</div>
+          <div class="finding-fix"><strong>Fix:</strong> ${esc(f.remediation)}</div>
         </div>`;
     }).join('\n');
 
     const agentIcon = agentName.includes('security') ? '\u{1F6E1}' : agentName.includes('review') ? '\u{1F50D}' : '\u26A1';
 
     return `
-      <div class="agent-section" style="margin-bottom:24px">
+      <div class="agent-section">
         <details open>
-          <summary style="cursor:pointer;font-size:16px;font-weight:600;color:#e4e4e7;padding:8px 0;border-bottom:1px solid #27272a;margin-bottom:12px">
-            ${agentIcon} ${escHtml(agentName)} <span style="color:#71717a;font-weight:400">(${agentFindings.length} finding${agentFindings.length !== 1 ? 's' : ''})</span>
+          <summary class="agent-summary">
+            ${agentIcon} ${esc(agentName)} <span class="agent-count">(${agentFindings.length} finding${agentFindings.length !== 1 ? 's' : ''})</span>
           </summary>
           ${findingsHTML}
         </details>
@@ -318,112 +321,174 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
   }).join('\n');
 
   const fpHTML = filteredFps.length > 0 ? `
-    <div style="margin-top:32px">
+    <div class="fp-section">
       <details>
-        <summary style="cursor:pointer;font-size:14px;font-weight:600;color:#71717a;padding:8px 0">
+        <summary class="collapsible-summary">
           Filtered false-positives (${filteredFps.length})
         </summary>
-        <div style="margin-top:8px">
+        <div class="fp-list">
           ${filteredFps.map(fp => `
-            <div style="padding:6px 12px;background:#18181b;border-radius:4px;margin-bottom:4px;color:#71717a;font-size:13px">
-              <span style="color:#a1a1aa">[${escHtml(fp.agent)}]</span> ${escHtml(fp.file)} &mdash; ${escHtml(fp.title)}
+            <div class="fp-item">
+              <span class="fp-agent">[${esc(fp.agent)}]</span> ${esc(fp.file)} &mdash; ${esc(fp.title)}
             </div>`).join('\n')}
         </div>
       </details>
     </div>` : '';
 
   const changedFilesHTML = changedFiles.length > 0 ? `
-    <div style="margin-top:24px">
+    <div class="changed-files-section">
       <details>
-        <summary style="cursor:pointer;font-size:14px;font-weight:600;color:#71717a;padding:8px 0">
+        <summary class="collapsible-summary">
           Changed files scoped (${changedFiles.length})
         </summary>
-        <div style="margin-top:8px;columns:2;column-gap:16px">
-          ${changedFiles.map(f => `<div style="color:#a1a1aa;font-size:12px;padding:2px 0;font-family:'IBM Plex Mono',monospace">${escHtml(f)}</div>`).join('\n')}
+        <div class="changed-files-list">
+          ${changedFiles.map(f => `<div class="changed-file mono">${esc(f)}</div>`).join('\n')}
         </div>
       </details>
     </div>` : '';
 
   const agentCardsHTML = agents.map(a => {
     const isOk = a.status === 'success' || a.status === 'completed';
-    const color = isOk ? '#22c55e' : '#ef4444';
-    const icon = isOk ? '\u2713' : '\u2717';
+    const cls = isOk ? 'agent-ok' : 'agent-fail';
     return `
-      <div style="background:#18181b;border-radius:8px;padding:12px 16px;border:1px solid #27272a;flex:1;min-width:140px">
-        <div style="color:${color};font-size:18px;font-weight:700">${icon}</div>
-        <div style="color:#e4e4e7;font-size:13px;font-weight:500;margin-top:4px">${escHtml(a.name)}</div>
-        <div style="color:#71717a;font-size:12px">${a.findingsCount || 0} finding${(a.findingsCount || 0) !== 1 ? 's' : ''}</div>
+      <div class="qg-agent-card">
+        <div class="qg-agent-icon ${cls}">${isOk ? '\u2713' : '\u2717'}</div>
+        <div class="qg-agent-name">${esc(a.name)}</div>
+        <div class="qg-agent-count">${a.findingsCount || 0} finding${(a.findingsCount || 0) !== 1 ? 's' : ''}</div>
       </div>`;
   }).join('\n');
 
+  const verdictColor = passed ? 'var(--green)' : hasBlockers ? 'var(--red)' : 'var(--orange)';
+  const verdictText = passed ? 'PASSED' : hasBlockers ? 'BLOCKERS FOUND' : 'ADVISORY ONLY';
+  const verdictIcon = passed ? '\u2713' : hasBlockers ? '\u2717' : '\u26A0';
+
   const statsHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;margin-top:20px">
+    <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-value">${summary.agentsRun || agents.length}</div>
         <div class="stat-label">Agents run</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" style="color:${(summary.totalBeforeFilter || 0) > 0 ? '#fbbf24' : '#22c55e'}">${summary.totalBeforeFilter || totalFindings}</div>
+        <div class="stat-value ${(summary.totalBeforeFilter || 0) > 0 ? 'text-warn' : 'text-ok'}">${summary.totalBeforeFilter || totalFindings}</div>
         <div class="stat-label">Total found</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" style="color:#ef4444">${summary.blockers || blockerFindings.length}</div>
+        <div class="stat-value text-danger">${summary.blockers || blockerFindings.length}</div>
         <div class="stat-label">Blockers</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" style="color:#fbbf24">${summary.advisory || advisoryFindings.length}</div>
+        <div class="stat-value text-warn">${summary.advisory || advisoryFindings.length}</div>
         <div class="stat-label">Advisory</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" style="color:#71717a">${filteredFps.length}</div>
+        <div class="stat-value text-muted">${filteredFps.length}</div>
         <div class="stat-label">FPs filtered</div>
       </div>
     </div>`;
 
-  const verdictColor = passed ? '#22c55e' : hasBlockers ? '#ef4444' : '#fbbf24';
-  const verdictText = passed ? 'PASSED' : hasBlockers ? 'BLOCKERS FOUND' : 'ADVISORY ONLY';
-  const verdictIcon = passed ? '\u2713' : hasBlockers ? '\u2717' : '\u26A0';
+  // Severity-specific CSS using hardcoded colors (these are severity-specific, not theme tokens)
+  const severityCSS = Object.entries(SEVERITY_COLORS).map(([sev, c]) => `
+  .finding-${sev} { border-left: 3px solid ${c.border}; background: ${c.bg}; }
+  .sev-${sev} { background: ${c.badge}; }
+  .finding-title-${sev} { color: ${c.text}; }`).join('\n');
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Quality Gate Report</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#09090b; color:#e4e4e7; font-family:'IBM Plex Sans',system-ui,sans-serif; padding:32px; min-height:100vh; }
-  code, .mono { font-family:'IBM Plex Mono',monospace; }
-  .container { max-width:900px; margin:0 auto; }
+  const extraCSS = `
+  body { padding: 32px; }
+  .container { max-width: 900px; margin: 0 auto; }
+
+  /* Verdict banner */
   .verdict-banner {
-    text-align:center; padding:32px 24px; border-radius:12px; margin-bottom:32px;
-    background:linear-gradient(135deg, #18181b 0%, #1a1a2e 100%);
-    border:2px solid ${verdictColor};
+    text-align: center; padding: 32px 24px; border-radius: 12px; margin-bottom: 32px;
+    background: linear-gradient(135deg, var(--surface-solid) 0%, #1a1a2e 100%);
+    border: 2px solid ${verdictColor};
   }
-  .verdict-icon { font-size:48px; margin-bottom:8px; }
-  .verdict-text { font-size:28px; font-weight:700; letter-spacing:2px; color:${verdictColor}; }
-  .verdict-sub { color:#71717a; font-size:14px; margin-top:8px; }
+  .verdict-icon { font-size: 48px; margin-bottom: 8px; }
+  .verdict-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; color: ${verdictColor}; }
+  .verdict-sub { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
+
+  /* Stat cards */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; margin-top: 20px; }
   .stat-card {
-    background:#18181b; border-radius:8px; padding:12px 16px; text-align:center;
-    border:1px solid #27272a;
+    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px; text-align: center;
+    border: 1px solid var(--border);
   }
-  .stat-value { font-size:24px; font-weight:700; color:#e4e4e7; }
-  .stat-label { font-size:11px; color:#71717a; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
-  details > summary { list-style:none; }
-  details > summary::-webkit-details-marker { display:none; }
-  details > summary::before { content:'\\25B6 '; font-size:10px; margin-right:6px; color:#71717a; }
-  details[open] > summary::before { content:'\\25BC '; }
-  .agents-row { display:flex; gap:12px; flex-wrap:wrap; margin-top:24px; }
-  .section-title { font-size:18px; font-weight:600; color:#a1a1aa; margin:32px 0 16px; border-bottom:1px solid #27272a; padding-bottom:8px; }
-  .footer { text-align:center; color:#3f3f46; font-size:12px; margin-top:48px; padding-top:16px; border-top:1px solid #18181b; }
-</style>
-</head>
-<body>
+  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
+  .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+  .text-ok { color: var(--green); }
+  .text-warn { color: var(--orange); }
+  .text-danger { color: var(--red); }
+  .text-muted { color: var(--text-muted); }
+
+  /* Agent cards */
+  .agents-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+  .qg-agent-card {
+    background: var(--surface-solid); border-radius: 8px; padding: 12px 16px;
+    border: 1px solid var(--border); flex: 1; min-width: 140px;
+  }
+  .qg-agent-icon { font-size: 18px; font-weight: 700; }
+  .agent-ok { color: var(--green); }
+  .agent-fail { color: var(--red); }
+  .qg-agent-name { color: var(--text); font-size: 13px; font-weight: 500; margin-top: 4px; }
+  .qg-agent-count { color: var(--text-muted); font-size: 12px; }
+
+  /* Details / collapsible */
+  details > summary { list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '\\25B6 '; font-size: 10px; margin-right: 6px; color: var(--text-muted); }
+  details[open] > summary::before { content: '\\25BC '; }
+
+  /* Agent findings sections */
+  .agent-section { margin-bottom: 24px; }
+  .agent-summary {
+    cursor: pointer; font-size: 16px; font-weight: 600; color: var(--text);
+    padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  .agent-count { color: var(--text-muted); font-weight: 400; }
+  .section-title {
+    font-size: 18px; font-weight: 600; color: var(--text-secondary);
+    margin: 32px 0 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  }
+
+  /* Finding cards */
+  .finding { padding: 12px 16px; border-radius: 6px; margin-bottom: 8px; }
+  .finding-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sev-badge {
+    color: #fff; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+  }
+  .finding-title { font-weight: 500; }
+  .finding-location { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
+  .finding-desc { color: #d4d4d8; font-size: 13px; margin-bottom: 6px; }
+  .finding-fix { color: #86efac; font-size: 13px; }
+  ${severityCSS}
+
+  /* Collapsible sections */
+  .collapsible-summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted); padding: 8px 0; }
+  .fp-section { margin-top: 32px; }
+  .fp-list { margin-top: 8px; }
+  .fp-item {
+    padding: 6px 12px; background: var(--surface-solid); border-radius: 4px;
+    margin-bottom: 4px; color: var(--text-muted); font-size: 13px;
+  }
+  .fp-agent { color: var(--text-secondary); }
+  .changed-files-section { margin-top: 24px; }
+  .changed-files-list { margin-top: 8px; columns: 2; column-gap: 16px; }
+  .changed-file { color: var(--text-secondary); font-size: 12px; padding: 2px 0; }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 40px; color: #3f3f46; font-size: 16px; margin-top: 32px; }
+
+  /* Footer */
+  .footer {
+    text-align: center; color: #3f3f46; font-size: 12px;
+    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--surface-solid);
+  }`;
+
+  const bodyHTML = `
 <div class="container">
   <div class="verdict-banner">
-    <div class="verdict-icon">${verdictIcon}</div>
-    <div class="verdict-text">${verdictText}</div>
+    <div class="verdict-icon">${esc(verdictIcon)}</div>
+    <div class="verdict-text">${esc(verdictText)}</div>
     <div class="verdict-sub">${totalFindings} finding${totalFindings !== 1 ? 's' : ''} across ${agents.length} agent${agents.length !== 1 ? 's' : ''}</div>
   </div>
 
@@ -435,7 +500,7 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
     <div class="section-title">Findings by Agent</div>
     ${agentSectionHTML}
   ` : `
-    <div style="text-align:center;padding:40px;color:#3f3f46;font-size:16px;margin-top:32px">
+    <div class="empty-state">
       No issues found. Clean bill of health.
     </div>
   `}
@@ -445,9 +510,9 @@ function generateReportHTML({ agents, findings, filteredFps, changedFiles, summa
   ${changedFilesHTML}
 
   <div class="footer">
-    Generated by Forge Quality Gate &middot; ${escHtml(timestamp)}
+    Generated by Forge Quality Gate &middot; ${esc(timestamp)}
   </div>
-</div>
-</body>
-</html>`;
+</div>`;
+
+  return wrapPage('Quality Gate Report', bodyHTML, extraCSS);
 }
