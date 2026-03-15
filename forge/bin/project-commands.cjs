@@ -795,7 +795,7 @@ function generateDashboardHTML(data) {
     const statusClass = qt.status === 'closed' ? 'phase-done' : qt.status === 'in_progress' ? 'phase-active' : 'phase-pending';
     const statusBadge = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
     const childrenHTML = qt.children.length > 0 ? `<ul class="task-list">${qt.children.map(c => `<li class="${c.status === 'closed' ? 'task-done' : 'task-pending'}"><span class="task-icon">${c.status === 'closed' ? '&#x2713;' : '&#x25CB;'}</span> ${esc(c.title)}</li>`).join('\n')}</ul>` : '';
-    const prLinkHTML = qt.prUrl ? `<a href="${esc(qt.prUrl)}" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>` : '';
+    const prLinkHTML = qt.prUrl && /^https?:\/\//i.test(qt.prUrl) ? `<a href="${esc(qt.prUrl)}" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>` : '';
     return `
           <div class="phase-card ${statusClass}">
             <div class="phase-header">
@@ -2314,7 +2314,7 @@ function generateInteractiveDashboardHTMLWithUrlToken(data) {
                 var tCls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
                 var hasDetails = t.description || t.acceptance_criteria;
                 parts.push('<li class="' + tCls + '"><details' + (hasDetails ? '' : ' class="no-detail"') + '>');
-                parts.push('<summary><span class="task-icon">' + tIcon + '</span> ' + esc(t.title) + ' <code>' + t.id + '</code></summary>');
+                parts.push('<summary><span class="task-icon">' + tIcon + '</span> ' + esc(t.title) + ' <code>' + esc(t.id) + '</code></summary>');
                 if (hasDetails) {
                   parts.push('<div class="task-details">');
                   if (t.description) parts.push('<div class="task-desc"><strong>Description:</strong> ' + esc(t.description) + '</div>');
@@ -2377,7 +2377,7 @@ function generateInteractiveDashboardHTMLWithUrlToken(data) {
           }
           parts.push('</ul>');
         }
-        if (qt.prUrl) parts.push('<a href="' + esc(qt.prUrl) + '" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>');
+        if (qt.prUrl && /^https?:\/\//i.test(qt.prUrl)) parts.push('<a href="' + esc(qt.prUrl) + '" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>');
         parts.push('</div>');
       }
       parts.push('</div></div>');

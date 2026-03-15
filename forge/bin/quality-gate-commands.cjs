@@ -211,6 +211,11 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: --data', 'Run: forge-tools quality-gate-report --data=\'<JSON>\'');
     }
 
+    const DATA_SIZE_LIMIT = 10 * 1024 * 1024; // 10 MB
+    if (Buffer.byteLength(dataStr, 'utf8') > DATA_SIZE_LIMIT) {
+      forgeError('DATA_TOO_LARGE', '--data exceeds 10 MB size limit', 'Reduce the size of the --data JSON payload');
+    }
+
     let data;
     try {
       data = JSON.parse(dataStr);
@@ -285,6 +290,11 @@ module.exports = {
 
     if (!dataStr) {
       forgeError('MISSING_ARG', 'Missing required argument: --data', 'Run: forge-tools quality-gate-triage --data=\'<JSON>\'');
+    }
+
+    const DATA_SIZE_LIMIT = 10 * 1024 * 1024; // 10 MB
+    if (Buffer.byteLength(dataStr, 'utf8') > DATA_SIZE_LIMIT) {
+      forgeError('DATA_TOO_LARGE', '--data exceeds 10 MB size limit', 'Reduce the size of the --data JSON payload');
     }
 
     let data;
