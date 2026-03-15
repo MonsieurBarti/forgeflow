@@ -179,7 +179,6 @@ Forge uses specialized subagents, each spawned with a fresh context window:
 | Hook | Event | Purpose |
 |------|-------|---------|
 | **forge-context-monitor** | PostToolUse | Tracks active project context |
-| **forge-statusline** | — | Displays current phase/task in status bar |
 | **forge-update-check** | SessionStart | Checks for new Forge versions |
 
 ### Execution Model

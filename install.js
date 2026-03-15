@@ -133,10 +133,6 @@ function registerHooks() {
     console.log('  Registered SessionStart hook: forge-update-check');
   }
 
-  // Wire statusLine to forge-statusline.js
-  const statusLinePath = path.join(CLAUDE_DIR, 'hooks', 'forge-statusline.js');
-  settings.statusLine = `node "${statusLinePath}"`;
-
   // Copy package.json into installed forge dir for version comparison
   const srcPkg = path.join(SRC, 'package.json');
   const destPkg = path.join(CLAUDE_DIR, 'forge', 'package.json');

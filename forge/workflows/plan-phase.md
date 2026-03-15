@@ -236,8 +236,16 @@ If any task in this phase also contributes to a sibling phase's requirement, wir
 dependency to it. This provides cross-phase traceability.
 </end sibling reqs section>
 
-For each task:
-1. Create the task bead with acceptance_criteria
+For each task, determine:
+- files_affected: list of file paths that will be created or modified
+- approach: 1-2 sentence implementation summary
+- complexity: simple | medium | complex
+
+Then create the task:
+1. Create the task bead with acceptance_criteria and --design containing JSON:
+   bd create --title=\"<title>\" --description=\"<what>\" --acceptance=\"<criteria>\" \
+     --design='{\"files_affected\":[\"path/to/file.ts\"],\"approach\":\"<summary>\",\"complexity\":\"<simple|medium|complex>\"}' \
+     --type=task --priority=2 --json
 2. Add parent-child dep to the phase
 3. Add forge:task label
 4. Add validates dep to requirements it fulfills
@@ -249,7 +257,8 @@ If creating tasks directly (small phase, clear scope):
 ```bash
 bd create --title="<task title>" \
   --description="<what to implement>" \
-  --acceptance_criteria="<specific, testable criteria>" \
+  --acceptance="<specific, testable criteria>" \
+  --design='{"files_affected":["path/to/file.ts"],"approach":"<1-2 sentence summary>","complexity":"<simple|medium|complex>"}' \
   --type=task --priority=2 --json
 bd dep add <task-id> <phase-id> --type=parent-child
 bd label add <task-id> forge:task
@@ -373,6 +382,44 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>
 
 Display to user. Best-effort -- if command fails, skip silently.
 
+If `estimated_cost_usd` is not null, display:
+> Estimated phase cost: $\<cost\> (\<confidence\> confidence, based on \<N\> phase(s))
+
+If null or the command fails, skip silently.
+
+## 6.7. Implementation Preview & Approval Gate
+
+Generate a detailed implementation preview and present it to the user for approval before
+marking the phase as planned. This is a **hard gate** — the user must explicitly approve.
+
+```bash
+PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" implementation-preview <phase-id>)
+```
+
+Parse the JSON output. Format a human-readable summary grouped by execution wave:
+
+For each wave, show a table or structured list with per-task:
+- **Title** and task ID
+- **Files affected** (count and list)
+- **Approach** (1-2 sentence summary)
+- **Complexity** (simple/medium/complex)
+- **Architect notes** (if any from step 5.5)
+
+Include the `architect_summary` at the top if present.
+
+Present via AskUserQuestion (single-select, not multiSelect):
+- header: "Plan approval"
+- question: "Approve this plan? <total_tasks> tasks, <total_files_affected> files affected"
+- options:
+  1. "Approve — start execution" (proceeds to step 7)
+  2. "Reject — re-plan or adjust" (stops workflow)
+
+**On approval:** Proceed to step 7 (mark phase as planned).
+
+**On rejection:** Stop the workflow. Suggest:
+- `/forge:plan <phase> --skip-research` to re-plan with different decisions
+- Manual task edits via `bd update <task-id>` to adjust individual tasks
+
 ## 7. Mark Phase as Planned
 
 ```bash
@@ -386,18 +433,6 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
 
 Creates `forge/m<milestone-id>/phase-<phase-id>`. If branch exists, command is idempotent. Without a milestone parent, creates `forge/phase-<phase-id>`.
 
-## 8. Cost Estimate
-
-```bash
-COST_EST=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>)
-```
-
-Parse JSON. Display based on result:
-- If `estimated_cost_usd` is not null: `Estimated phase cost: $<cost> (<confidence> confidence, based on <N> phase(s))`
-- If null: `Cost estimate: not available (no completed phases with cost data yet)`
-- If `task_count` is 0: `Cost estimate: $0.00 (no tasks in phase)`
-
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
 
 </process>
-</output>
