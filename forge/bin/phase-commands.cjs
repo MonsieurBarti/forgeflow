@@ -17,6 +17,53 @@ const {
   bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
 } = require('./core.cjs');
 
+/**
+ * Collect all forge:req beads from a milestone using 3-level traversal:
+ *   milestone -> phases (forge:phase children) -> each phase's children filtered for forge:req
+ *
+ * Also includes legacy fallback: any forge:req beads that are direct children
+ * of the milestone (old data where reqs lived under the milestone directly).
+ *
+ * @param {string} milestoneId  The milestone bead ID
+ * @returns {Array} Deduplicated array of requirement beads
+ */
+function collectMilestoneRequirements(milestoneId) {
+  const milestoneChildren = bdJsonArgs(['children', milestoneId]);
+  const allMilestoneIssues = normalizeChildren(milestoneChildren);
+
+  const seenIds = new Set();
+  const requirements = [];
+
+  const addReq = (req) => {
+    if (seenIds.has(req.id)) return;
+    seenIds.add(req.id);
+    requirements.push(req);
+  };
+
+  // 3-level traversal: milestone -> phases -> phase children filtered for forge:req
+  const phases = allMilestoneIssues.filter(i =>
+    (i.labels || []).includes('forge:phase')
+  );
+  for (const phase of phases) {
+    const phaseChildren = bdJsonArgs(['children', phase.id]);
+    const phaseIssues = normalizeChildren(phaseChildren);
+    for (const issue of phaseIssues) {
+      if ((issue.labels || []).includes('forge:req')) {
+        addReq(issue);
+      }
+    }
+  }
+
+  // Legacy fallback: direct milestone children with forge:req label
+  for (const issue of allMilestoneIssues) {
+    if ((issue.labels || []).includes('forge:req')) {
+      addReq(issue);
+    }
+  }
+
+  return requirements;
+}
+
 module.exports = {
   /**
    * Get phase context: phase details + all tasks + their statuses.
@@ -121,14 +168,11 @@ module.exports = {
     }
 
     // Check requirement coverage via validates deps
+    // 3-level traversal: phase -> parent milestone -> all phases -> each phase's children filtered for forge:req
     const parentId = phase?.parent || null;
     let uncoveredReqs = [];
     if (parentId) {
-      const projectChildren = bdJsonArgs(['children', parentId]);
-      const allIssues = normalizeChildren(projectChildren);
-      const requirements = allIssues.filter(i =>
-        (i.labels || []).includes('forge:req')
-      );
+      const requirements = collectMilestoneRequirements(parentId);
 
       // TODO(perf): N+1 subprocess -- calls bd dep list per requirement. Needs bd CLI batch-query support.
       for (const req of requirements) {
@@ -511,14 +555,11 @@ module.exports = {
     const completedIds = new Set(tasksToVerify.map(t => t.id));
     const openTasks = enrichedTasks.filter(t => !completedIds.has(t.id));
 
+    // 3-level traversal: phase -> parent milestone -> all phases -> each phase's children filtered for forge:req
     const parentId = phase?.parent || null;
     let requirements = [];
     if (parentId) {
-      const projectChildren = bdJsonArgs(['children', parentId]);
-      const allIssues = normalizeChildren(projectChildren);
-      requirements = allIssues.filter(i =>
-        (i.labels || []).includes('forge:req')
-      );
+      requirements = collectMilestoneRequirements(parentId);
     }
 
     output({
