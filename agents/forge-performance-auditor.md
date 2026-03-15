@@ -37,6 +37,10 @@ Categories for this agent:
 - `blocking-operation` -- Synchronous blocking in async context
 </output_format>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <execution_flow>
 
 <step name="discover">

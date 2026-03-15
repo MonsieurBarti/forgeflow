@@ -134,6 +134,20 @@ Session memories persist the most recent active context so sessions can be resum
 | `forge:session:last-milestone` | `/forge:new-milestone`, `/forge:new` | ID of the most recently created/active milestone |
 | `forge:session:notes` | `/forge:pause` | Free-form notes saved at pause time |
 
+### Codebase Memories (`forge:codebase:*`)
+
+Persisted by the `persist_intelligence` step in `/forge:map-codebase`. These provide fast
+codebase context for agents without reading the full `.forge/codebase/` documents. Re-running
+map-codebase overwrites all keys with fresh values.
+
+| Key | Source Document | Content |
+|-----|----------------|---------|
+| `forge:codebase:stack` | `STACK.md` | Languages, runtime, frameworks, key dependencies |
+| `forge:codebase:arch` | `ARCHITECTURE.md` | Architectural pattern, layers, data flow, entry points |
+| `forge:codebase:commands` | `STACK.md` | Build, test, run, lint commands |
+| `forge:codebase:conventions` | `CONVENTIONS.md` | Code style, naming conventions, error handling patterns |
+| `forge:codebase:concerns` | `CONCERNS.md` | Top technical debt items, fragile areas |
+
 ### Memory Lifecycle
 
 ```bash
@@ -151,6 +165,12 @@ bd forget forge:session:notes
 ```
 
 Use `/forge:memories` to browse all stored memories grouped by type.
+
+## Code Navigation
+
+For AST-aware code navigation (symbol definitions, references, impact analysis), see
+`forge/references/code-graph.md`. When `code-graph` is installed, agents MUST use it
+for structural queries. When absent, agents silently fall back to Grep/Glob.
 
 ## Querying Patterns
 

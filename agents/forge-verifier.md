@@ -31,6 +31,10 @@ expected API to return 404 for missing resources, but handler returns 500 with n
 error body" gives the executor everything they need to fix it in one pass.
 </philosophy>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <execution_flow>
 
 <step name="load">

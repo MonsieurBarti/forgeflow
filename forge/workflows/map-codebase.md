@@ -193,6 +193,52 @@ wc -l .forge/codebase/*.md
 
 If any documents missing or empty, note which agents may have failed.
 
+Continue to persist_intelligence.
+</step>
+
+<step name="persist_intelligence">
+Persist key codebase insights to bd memories for fast agent lookup.
+
+This step extracts concise summaries from the generated `.forge/codebase/` documents and saves them as granular memory keys. These memories give agents quick context about the codebase without needing to read the full documents.
+
+**Note:** `bd remember` overwrites existing values by default, so re-running map-codebase will refresh all memories with the latest analysis.
+
+For each memory key below, read the source document, extract a focused 3-8 line summary, and save it.
+Read each source document once — extract all needed summaries from a single read.
+
+**1 & 3. Stack + Commands (read STACK.md once):**
+```bash
+# Read .forge/codebase/STACK.md ONCE and extract BOTH summaries:
+# - Languages, runtime, frameworks, key dependencies → forge:codebase:stack
+# - Build, test, run, lint commands → forge:codebase:commands
+bd remember --key "forge:codebase:stack" "<concise 3-8 line summary of languages, runtime, frameworks, and key dependencies>"
+bd remember --key "forge:codebase:commands" "<concise 3-8 line summary of build, test, run, and lint commands>"
+```
+
+**2. Architecture summary (from ARCHITECTURE.md):**
+```bash
+# Read .forge/codebase/ARCHITECTURE.md and extract: pattern, layers, data flow, entry points
+bd remember --key "forge:codebase:arch" "<concise 3-8 line summary of architectural pattern, layers, data flow, and entry points>"
+```
+
+**4. Conventions summary (from CONVENTIONS.md):**
+```bash
+# Read .forge/codebase/CONVENTIONS.md and extract: code style, naming, error handling patterns
+bd remember --key "forge:codebase:conventions" "<concise 3-8 line summary of code style, naming conventions, and error handling patterns>"
+```
+
+**5. Concerns summary (from CONCERNS.md):**
+```bash
+# Read .forge/codebase/CONCERNS.md and extract: top tech debt items, fragile areas
+bd remember --key "forge:codebase:concerns" "<concise 3-8 line summary of top technical debt items and fragile areas>"
+```
+
+After saving all 5 memories, verify they were persisted:
+
+```bash
+bd memories forge:codebase:
+```
+
 Continue to scan_for_secrets.
 </step>
 
@@ -202,7 +248,7 @@ Continue to scan_for_secrets.
 Run secret pattern detection:
 
 ```bash
-# Check for common API key patterns in generated docs
+# Intentional bare grep — scanning generated output files, not source code structure
 grep -E '(sk-[a-zA-Z0-9]{20,}|sk_live_[a-zA-Z0-9]+|sk_test_[a-zA-Z0-9]+|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9_-]+|AKIA[A-Z0-9]{16}|xox[baprs]-[a-zA-Z0-9-]+|-----BEGIN.*PRIVATE KEY|eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.)' .forge/codebase/*.md 2>/dev/null && SECRETS_FOUND=true || SECRETS_FOUND=false
 ```
 

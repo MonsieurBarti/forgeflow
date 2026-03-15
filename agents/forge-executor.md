@@ -35,6 +35,10 @@ Read the project's CLAUDE.md for codebase conventions and patterns.
 Understand existing code before making changes.
 </project_context>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <execution_flow>
 
 <step name="claim">

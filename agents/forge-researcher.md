@@ -30,6 +30,10 @@ issue, say so. If an approach has a hidden complexity cliff, flag it.
 present in the existing code. Reuse beats invention.
 </philosophy>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <execution_flow>
 
 <step name="understand">

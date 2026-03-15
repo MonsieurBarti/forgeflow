@@ -31,6 +31,10 @@ If a behavior matters, it must appear in the criteria. If it does not appear, th
 has no obligation to implement it.
 </philosophy>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <execution_flow>
 
 <step name="context">

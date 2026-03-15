@@ -14,6 +14,10 @@ structured findings as JSON to stdout. Your findings are advisory and non-blocki
 they inform developers but never gate merges or deployments.
 </role>
 
+<code_navigation>
+@forge/references/code-graph.md
+</code_navigation>
+
 <context_loading>
 
 <step name="load_conventions">
