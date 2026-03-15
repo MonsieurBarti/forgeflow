@@ -20,7 +20,7 @@ const FP_KEY_PREFIX = 'forge:quality-gate:fp:';
  * Line numbers are excluded so the same finding survives line shifts.
  */
 function computeFpHash(agent, category, file, title) {
-  const input = `${agent}${category}${file}${title}`;
+  const input = [agent, category, file, title].join('\x00');
   return crypto.createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
@@ -116,7 +116,7 @@ module.exports = {
         // INTENTIONALLY SILENT: malformed FP entry, skip it
         finding = { raw: value };
       }
-      fps.push({ hash, key, ...finding });
+      fps.push({ hash, key, agent: finding.agent, category: finding.category, file: finding.file, title: finding.title });
     }
 
     output({ ok: true, count: fps.length, false_positives: fps });

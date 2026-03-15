@@ -779,11 +779,7 @@ function generateDashboardHTML(data) {
   const quickTaskCardsHTML = quickTasks.map(qt => {
     const statusClass = qt.status === 'closed' ? 'phase-done' : qt.status === 'in_progress' ? 'phase-active' : 'phase-pending';
     const statusBadge = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
-    const childrenHTML = qt.children.length > 0 ? `<ul class="task-list">${qt.children.map(c => {
-      const icon = c.status === 'closed' ? '&#x2713;' : '&#x25CB;';
-      const cls = c.status === 'closed' ? 'task-done' : 'task-pending';
-      return `<li class="${cls}"><span class="task-icon">${icon}</span> ${esc(c.title)}</li>`;
-    }).join('\n')}</ul>` : '';
+    const childrenHTML = qt.children.length > 0 ? `<ul class="task-list">${qt.children.map(c => `<li class="${c.status === 'closed' ? 'task-done' : 'task-pending'}"><span class="task-icon">${c.status === 'closed' ? '&#x2713;' : '&#x25CB;'}</span> ${esc(c.title)}</li>`).join('\n')}</ul>` : '';
     const prLinkHTML = qt.prUrl ? `<a href="${esc(qt.prUrl)}" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>` : '';
     return `
           <div class="phase-card ${statusClass}">

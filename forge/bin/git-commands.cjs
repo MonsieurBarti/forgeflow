@@ -10,7 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bd, bdJson, git, gh, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
+const { bd, bdArgs, bdJson, git, gh, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
 
 /**
  * Resolve a worktree path and verify it stays within the expected base directory.
@@ -271,6 +271,7 @@ module.exports = {
     if (!quickId) {
       forgeError('MISSING_ARG', 'Missing required argument: quick-id', 'Run: forge-tools quick-pr-create <quick-id> [--base=<branch>]');
     }
+    validateId(quickId);
 
     const quickRaw = bdJson(`show ${quickId}`);
     const quick = Array.isArray(quickRaw) ? quickRaw[0] : quickRaw;
@@ -305,7 +306,7 @@ module.exports = {
         '--head', branch,
       ]);
       // Persist PR URL in bead notes so the dashboard can display it
-      bd(`update ${quickId} --notes="PR: ${prUrl.trim()}"`, { allowFail: true });
+      bdArgs(['update', quickId, `--notes=PR: ${prUrl.trim()}`], { allowFail: true });
       output({ created: true, url: prUrl, branch, base, title });
     } catch (err) {
       forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools quick-pr-create <quick-id>', { branch, base });
