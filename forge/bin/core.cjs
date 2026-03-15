@@ -104,6 +104,10 @@ const ROLE_TO_AGENT = {
 
 const DEFAULT_MODEL_PROFILE = 'balanced';
 
+// --- Dolt Timing Constants ---
+
+const DOLT_RESTART_WAIT_MS = 1000;
+
 // --- Simple YAML Helpers ---
 
 // Keys that must never be assigned to avoid prototype pollution
@@ -192,7 +196,7 @@ function restartDolt() {
     // The entire forge-tools pipeline is synchronous (execFileSync-based), so
     // async alternatives cannot be used without a full architecture migration.
     // Migrate to async when the command layer supports it.
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DOLT_RESTART_WAIT_MS);
   } catch (_) {
     // INTENTIONALLY SILENT: Restart is best-effort; the subsequent _bdExec retry
     // will surface the real failure if Dolt is still unreachable.
