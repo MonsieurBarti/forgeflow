@@ -60,17 +60,28 @@ function installAgents() {
 
   if (!fs.existsSync(agentsDir)) return;
 
-  const files = fs.readdirSync(agentsDir).filter(f => f.startsWith('forge-') && f.endsWith('.md'));
-  for (const file of files) {
-    console.log(`  Copying agent: ${file}`);
-    fs.copyFileSync(path.join(agentsDir, file), path.join(destDir, file));
+  // Copy the entire agents/ tree (agent .md files + schemas/ subdirectory)
+  // so that all agent definitions and their referenced schemas are installed.
+  const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+  const agentFiles = [];
+  for (const entry of entries) {
+    const srcPath = path.join(agentsDir, entry.name);
+    const dstPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      console.log(`  Copying agent subdir: ${entry.name}/`);
+      copyDir(srcPath, dstPath);
+    } else if (entry.name.endsWith('.md')) {
+      console.log(`  Copying agent: ${entry.name}`);
+      fs.copyFileSync(srcPath, dstPath);
+      agentFiles.push(entry.name);
+    }
   }
 
   // Also create project-local .claude/agents/ with symlinks for reliable
   // project-level discovery (Claude Code's standard agent discovery path).
   const projectAgentsDir = path.join(SRC, '.claude', 'agents');
   ensureDir(projectAgentsDir);
-  for (const file of files) {
+  for (const file of agentFiles) {
     const linkPath = path.join(projectAgentsDir, file);
     const target = path.join('..', '..', 'agents', file);
     try {
@@ -82,7 +93,7 @@ function installAgents() {
       fs.copyFileSync(path.join(agentsDir, file), linkPath);
     }
   }
-  console.log(`  Created .claude/agents/ symlinks (${files.length} agents)`);
+  console.log(`  Created .claude/agents/ symlinks (${agentFiles.length} agents)`);
 }
 
 function installHooks() {
@@ -208,12 +219,10 @@ function writeManifest() {
     }
   }
 
-  // Collect installed agent files
+  // Collect installed agent files (including schemas/ subdirectory)
   const agentsDir = path.join(CLAUDE_DIR, 'agents');
   if (fs.existsSync(agentsDir)) {
-    const agentFiles = fs.readdirSync(agentsDir).filter(f => f.startsWith('forge-') && f.endsWith('.md'));
-    for (const file of agentFiles) {
-      const filePath = path.join(agentsDir, file);
+    for (const filePath of collectFiles(agentsDir)) {
       const relPath = path.relative(CLAUDE_DIR, filePath);
       files[relPath] = hashFile(filePath);
     }
