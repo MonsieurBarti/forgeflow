@@ -26,7 +26,7 @@ const {
   findGitRoot,
   resolveSettings,
 } = require('./core.cjs');
-const { esc, CSS_VARS, wrapPage } = require('./design-system.cjs');
+const { esc, CSS_VARS, wrapPage, card, badge, progressRing, statusDot, COMPONENT_CSS } = require('./design-system.cjs');
 const { serveAndAwaitDecision } = require('./dev-server.cjs');
 
 /**
@@ -45,9 +45,9 @@ const MILESTONE_GRADIENTS = [
 ];
 
 /**
- * Base CSS shared by both the static dashboard (generateDashboardHTML) and the
- * interactive dashboard (generateInteractiveDashboardHTML).
- * The interactive variant appends its extra button/header styles on top.
+ * Page-specific CSS for the static dashboard (generateDashboardHTML).
+ * Base card/badge/ring/tab styles come from design-system COMPONENT_CSS.
+ * Only layout, gradients, content styling, and responsive rules remain here.
  */
 const DASHBOARD_BASE_CSS = `
   /* --- Header --- */
@@ -56,66 +56,22 @@ const DASHBOARD_BASE_CSS = `
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, rgba(99,102,241,0.04) 0%, transparent 100%);
   }
-  .dash-header h1 {
-    font-size: 1.75rem;
-    font-weight: 600;
-    letter-spacing: -0.025em;
-  }
-  .dash-header .subtitle {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    margin-top: 0.25rem;
-  }
-
+  .dash-header h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; }
+  .dash-header .subtitle { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
   .dash-body { padding: 2rem 3rem 4rem; max-width: 1280px; margin: 0 auto; }
 
-  /* --- Glassmorphism stat cards --- */
-  .overview-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-    margin-bottom: 2.5rem;
-  }
-  .stat-card {
-    background: var(--surface);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    position: relative;
-    overflow: hidden;
-  }
+  /* --- Stat card overrides (on top of ds-card) --- */
+  .overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
+  .stat-card { transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
   .stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--card-accent, var(--accent));
-    opacity: 0;
-    transition: opacity 0.2s ease;
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: var(--card-accent, var(--accent));
+    opacity: 0; transition: opacity 0.2s ease;
   }
-  .stat-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(255,255,255,0.1);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  }
+  .stat-card:hover { transform: translateY(-2px); }
   .stat-card:hover::before { opacity: 1; }
-  .stat-card .stat-value {
-    font-size: 2.25rem;
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: -0.025em;
-  }
-  .stat-card .stat-label {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 0.35rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 500;
-  }
+  .stat-card .stat-value { font-size: 2.25rem; font-weight: 700; line-height: 1; letter-spacing: -0.025em; }
+  .stat-card .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
   .stat-card.accent { --card-accent: var(--accent); }
   .stat-card.accent .stat-value { color: var(--accent); }
   .stat-card.green { --card-accent: var(--green); }
@@ -125,429 +81,298 @@ const DASHBOARD_BASE_CSS = `
   .stat-card.blue { --card-accent: var(--blue); }
   .stat-card.blue .stat-value { color: var(--blue); }
 
-  /* --- SVG Progress Rings --- */
-  .charts-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-    margin-bottom: 2.5rem;
-  }
-  .chart-card {
-    background: var(--surface);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    transition: border-color 0.2s ease;
-  }
-  .chart-card:hover { border-color: rgba(255,255,255,0.1); }
-  .chart-card h3 {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: 0.25rem;
-  }
-  .chart-card .chart-value {
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.025em;
-  }
-  .chart-card .chart-sub {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 0.15rem;
-  }
-  .ring-container {
-    flex-shrink: 0;
-    position: relative;
-    width: 80px;
-    height: 80px;
-  }
-  .ring-container svg {
-    width: 80px;
-    height: 80px;
-    transform: rotate(-90deg);
-  }
-  .ring-container .ring-bg {
-    fill: none;
-    stroke: var(--surface-2);
-    stroke-width: 6;
-  }
-  .ring-container .ring-fg {
-    fill: none;
-    stroke-width: 6;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 1s ease;
-  }
-  .ring-pct {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-  }
+  /* --- Chart card overrides (on top of ds-card) --- */
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2.5rem; }
+  .chart-card .ds-card-content { display: flex; align-items: center; gap: 1.5rem; }
+  .chart-card h3 { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.25rem; }
+  .chart-card .chart-value { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; }
+  .chart-card .chart-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
 
-  @keyframes ring-fill {
-    from { stroke-dashoffset: var(--ring-circumference); }
-  }
-  .ring-container .ring-fg {
-    animation: ring-fill 1.2s ease forwards;
-  }
+  /* --- Milestone tab overrides (per-milestone gradient colors on top of ds-tab) --- */
+  .ds-tab-active { border-bottom-color: var(--tab-c1, var(--accent)); }
+  .tab-check { color: var(--green); margin-right: 0.35rem; font-weight: 700; }
 
-  /* --- Milestone tabs --- */
-  .ms-tabs-container { margin-bottom: 2.5rem; }
-  .ms-tabs-nav {
-    display: flex;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .ms-tabs-nav::-webkit-scrollbar { display: none; }
-  .ms-tab {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 0.75rem 1.25rem;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: color 0.2s ease, border-color 0.2s ease;
-    white-space: nowrap;
-    position: relative;
-  }
-  .ms-tab:hover {
-    color: var(--text-secondary);
-  }
-  .ms-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--tab-c1);
-  }
-  .tab-check {
-    color: var(--green);
-    margin-right: 0.35rem;
-    font-weight: 700;
-  }
-
-  /* --- Milestone panel --- */
-  .ms-panel { display: none; }
-  .ms-panel.active { display: block; }
-
-  .ms-header {
-    background: var(--surface);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem 2rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 1.5rem;
-    margin-bottom: 1.25rem;
-    position: relative;
-    overflow: hidden;
-  }
+  /* --- Milestone header (ds-card + gradient stripe) --- */
+  .ms-header { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; margin-bottom: 1.25rem; }
   .ms-header::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--ms-c1), var(--ms-c2));
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: linear-gradient(90deg, var(--ms-c1), var(--ms-c2));
   }
-  .ms-header h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    border: none;
-    padding: 0;
-    margin: 0;
-  }
-  .ms-goal {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    margin-top: 0.35rem;
-    max-width: 600px;
-  }
-  .ms-ring-wrap {
-    position: relative;
-    width: 80px;
-    height: 80px;
-    flex-shrink: 0;
-  }
-  .progress-ring {
-    width: 80px;
-    height: 80px;
-    transform: rotate(-90deg);
-  }
-  .progress-ring-bg {
-    fill: none;
-    stroke: var(--surface-2);
-    stroke-width: 5;
-  }
-  .progress-ring-fg {
-    fill: none;
-    stroke-width: 5;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 1s ease;
-    animation: ring-fill 1.2s ease forwards;
-  }
-  .ring-label {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-  }
+  .ms-header h2 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.015em; border: none; padding: 0; margin: 0; }
+  .ms-goal { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.35rem; max-width: 600px; }
 
-  .ms-stats-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.75rem;
-    margin-bottom: 1.5rem;
-  }
-  .ms-mini-stat {
-    background: var(--surface);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    text-align: center;
-  }
-  .ms-mini-val {
-    display: block;
-    font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: -0.025em;
-  }
-  .ms-mini-lbl {
-    display: block;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-top: 0.1rem;
-  }
+  /* --- Milestone mini-stat overrides (on top of ds-card) --- */
+  .ms-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.5rem; }
+  .ms-mini-stat.ds-card { border-radius: 8px; padding: 0.75rem 1rem; text-align: center; }
+  .ms-mini-val { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em; }
+  .ms-mini-lbl { display: block; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.1rem; }
 
   .section-title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 1rem;
-    margin-top: 1.5rem;
-    padding-bottom: 0.5rem;
+    font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 1rem; margin-top: 1.5rem; padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--border-subtle);
   }
   .empty-msg { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
 
-  /* --- Phase cards --- */
-  .phase-card {
-    background: var(--surface);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 0.75rem;
-    transition: border-color 0.2s ease, transform 0.15s ease;
-  }
-  .phase-card:hover {
-    border-color: rgba(255,255,255,0.1);
-    transform: translateX(2px);
-  }
+  /* --- Phase card overrides (on top of ds-card) --- */
+  .phase-card.ds-card { border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 0.75rem; }
+  .phase-card.ds-card:hover { transform: translateX(2px); }
   .phase-card.phase-active { border-left: 3px solid var(--orange); }
   .phase-card.phase-done { border-left: 3px solid var(--green); }
   .phase-card.phase-pending { border-left: 3px solid var(--border); }
-  .phase-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
+  .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
   .phase-header h3 { font-size: 0.95rem; font-weight: 500; }
   .phase-desc { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
-  .phase-completed {
-    font-size: 0.7rem;
-    color: var(--green);
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-  }
-  .badge {
-    font-size: 0.65rem;
-    padding: 0.15rem 0.55rem;
-    border-radius: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 600;
-  }
-  .badge-phase-done { background: rgba(34,197,94,0.12); color: var(--green); }
-  .badge-phase-active { background: rgba(245,158,11,0.12); color: var(--orange); }
-  .badge-phase-pending { background: rgba(113,113,122,0.12); color: var(--text-muted); }
-  .progress-bar-container {
-    width: 100%;
-    height: 3px;
-    background: var(--surface-2);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-bottom: 0.35rem;
-  }
-  .progress-bar {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.6s ease;
-  }
+  .phase-completed { font-size: 0.7rem; color: var(--green); margin-bottom: 0.5rem; font-weight: 500; }
+  .progress-bar-container { width: 100%; height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 0.35rem; }
+  .progress-bar { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
   .phase-stats { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; }
 
   /* --- Task list --- */
   .task-list { list-style: none; padding: 0; }
-  .task-list li {
-    padding: 0.25rem 0;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
+  .task-list li { padding: 0.25rem 0; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
   .task-icon { width: 1.2em; text-align: center; flex-shrink: 0; }
   .task-done { color: var(--green); }
   .task-active { color: var(--orange); }
   .task-pending { color: var(--text-muted); }
   .no-tasks { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
-  .task-list details summary {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    list-style: none;
-    transition: color 0.15s ease;
-  }
+  .task-list details summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; list-style: none; transition: color 0.15s ease; }
   .task-list details summary::-webkit-details-marker { display: none; }
   .task-list details summary:hover { color: var(--text); }
   .task-list details[open] summary { margin-bottom: 0.35rem; }
-  .task-details {
-    margin-left: 1.7rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-2);
-    border-radius: 6px;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-  .task-details pre {
-    white-space: pre-wrap;
-    font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
-    margin-top: 0.25rem;
-  }
+  .task-details { margin-left: 1.7rem; padding: 0.5rem 0.75rem; background: var(--surface-2); border-radius: 6px; font-size: 0.75rem; color: var(--text-muted); }
+  .task-details pre { white-space: pre-wrap; font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; margin-top: 0.25rem; }
   .task-desc, .task-ac { margin-bottom: 0.35rem; }
   .no-detail summary { cursor: default; }
 
   /* --- Requirement grid --- */
-  .req-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 0.5rem;
-  }
-  .req-cell {
-    padding: 0.5rem 0.75rem;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    transition: transform 0.15s ease;
-  }
+  .req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
+  .req-cell { padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.75rem; font-weight: 500; transition: transform 0.15s ease; }
   .req-cell:hover { transform: translateY(-1px); }
   .req-covered { background: rgba(34,197,94,0.08); color: var(--green); border: 1px solid rgba(34,197,94,0.15); }
   .req-uncovered { background: rgba(239,68,68,0.08); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
 
   /* --- Quick tasks --- */
   .quick-tasks-section { margin-top: 2.5rem; }
-  .quick-tasks-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 0.75rem;
-  }
-  .quick-pr-link {
-    display: inline-block;
-    margin-top: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--accent);
-    text-decoration: none;
-    font-weight: 500;
-    transition: color 0.15s ease;
-  }
+  .quick-tasks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.75rem; }
+  .quick-pr-link { display: inline-block; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent); text-decoration: none; font-weight: 500; transition: color 0.15s ease; }
   .quick-pr-link:hover { color: var(--blue); text-decoration: underline; }
 
-  /* --- Agent roster --- */
+  /* --- Agent card overrides (on top of ds-card) --- */
   .agent-section { margin-top: 3rem; }
-  .agent-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1rem;
-  }
-  .agent-card {
-    background: var(--surface);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.25rem;
-    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-    position: relative;
-    overflow: hidden;
-  }
+  .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .agent-card.ds-card { border-radius: 10px; padding: 1.25rem; }
   .agent-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--agent-color);
-    opacity: 0.6;
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: var(--agent-color); opacity: 0.6;
   }
-  .agent-card:hover {
-    border-color: rgba(255,255,255,0.1);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
-  }
-  .agent-vibe {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-style: italic;
-    margin-bottom: 0.5rem;
-  }
-  .agent-name {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin-bottom: 0.35rem;
-    letter-spacing: -0.01em;
-  }
-  .agent-desc {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    line-height: 1.5;
-    margin-bottom: 0.75rem;
-  }
-  .agent-badge {
-    display: inline-block;
-    font-size: 0.65rem;
-    padding: 0.15rem 0.5rem;
-    border-radius: 6px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
+  .agent-card:hover { transform: translateY(-2px); box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+  .agent-vibe { font-size: 0.7rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.5rem; }
+  .agent-name { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; letter-spacing: -0.01em; }
+  .agent-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 0.75rem; }
+  .agent-badge { display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 
   /* --- Responsive --- */
+  @media (max-width: 1024px) {
+    .dash-body { padding: 1.5rem; }
+    .dash-header { padding: 1.5rem; }
+    .overview-grid { grid-template-columns: repeat(2, 1fr); }
+    .charts-row { grid-template-columns: 1fr; }
+    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .dash-header { padding: 1.25rem; }
+    .dash-header h1 { font-size: 1.25rem; }
+    .dash-body { padding: 1rem; }
+    .overview-grid { grid-template-columns: 1fr; }
+    .charts-row { grid-template-columns: 1fr; }
+    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
+    .ms-header { flex-direction: column; gap: 1rem; text-align: center; }
+    .agent-grid { grid-template-columns: 1fr; }
+    .req-grid { grid-template-columns: 1fr; }
+    .quick-tasks-grid { grid-template-columns: 1fr; }
+  }`;
+
+/**
+ * Full legacy CSS for the interactive dashboard (generateInteractiveDashboardHTML).
+ * The interactive dashboard's client-side renderDashboard() uses the original CSS class
+ * names (.stat-card, .chart-card, .ring-container, .ms-tab, .badge, .phase-card,
+ * .agent-card, etc.) and will be migrated to design-system components in a future task.
+ */
+const DASHBOARD_INTERACTIVE_CSS = `
+  /* --- Header --- */
+  .dash-header {
+    padding: 2.5rem 3rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(99,102,241,0.04) 0%, transparent 100%);
+  }
+  .dash-header h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; }
+  .dash-header .subtitle { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
+  .dash-body { padding: 2rem 3rem 4rem; max-width: 1280px; margin: 0 auto; }
+
+  .overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
+  .stat-card {
+    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: var(--card-accent, var(--accent));
+    opacity: 0; transition: opacity 0.2s ease;
+  }
+  .stat-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+  .stat-card:hover::before { opacity: 1; }
+  .stat-card .stat-value { font-size: 2.25rem; font-weight: 700; line-height: 1; letter-spacing: -0.025em; }
+  .stat-card .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+  .stat-card.accent { --card-accent: var(--accent); }
+  .stat-card.accent .stat-value { color: var(--accent); }
+  .stat-card.green { --card-accent: var(--green); }
+  .stat-card.green .stat-value { color: var(--green); }
+  .stat-card.orange { --card-accent: var(--orange); }
+  .stat-card.orange .stat-value { color: var(--orange); }
+  .stat-card.blue { --card-accent: var(--blue); }
+  .stat-card.blue .stat-value { color: var(--blue); }
+
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2.5rem; }
+  .chart-card {
+    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem;
+    display: flex; align-items: center; gap: 1.5rem; transition: border-color 0.2s ease;
+  }
+  .chart-card:hover { border-color: rgba(255,255,255,0.1); }
+  .chart-card h3 { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.25rem; }
+  .chart-card .chart-value { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; }
+  .chart-card .chart-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
+  .ring-container { flex-shrink: 0; position: relative; width: 80px; height: 80px; }
+  .ring-container svg { width: 80px; height: 80px; transform: rotate(-90deg); }
+  .ring-container .ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 6; }
+  .ring-container .ring-fg { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+  .ring-pct { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
+  @keyframes ring-fill { from { stroke-dashoffset: var(--ring-circumference); } }
+  .ring-container .ring-fg { animation: ring-fill 1.2s ease forwards; }
+
+  .ms-tabs-container { margin-bottom: 2.5rem; }
+  .ms-tabs-nav {
+    display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border);
+    margin-bottom: 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .ms-tabs-nav::-webkit-scrollbar { display: none; }
+  .ms-tab {
+    background: none; border: none; color: var(--text-muted);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 0.85rem; font-weight: 500; padding: 0.75rem 1.25rem;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color 0.2s ease, border-color 0.2s ease; white-space: nowrap; position: relative;
+  }
+  .ms-tab:hover { color: var(--text-secondary); }
+  .ms-tab.active { color: var(--text); border-bottom-color: var(--tab-c1); }
+  .tab-check { color: var(--green); margin-right: 0.35rem; font-weight: 700; }
+
+  .ms-panel { display: none; }
+  .ms-panel.active { display: block; }
+  .ms-header {
+    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 1.5rem; margin-bottom: 1.25rem; position: relative; overflow: hidden;
+  }
+  .ms-header::after {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: linear-gradient(90deg, var(--ms-c1), var(--ms-c2));
+  }
+  .ms-header h2 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.015em; border: none; padding: 0; margin: 0; }
+  .ms-goal { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.35rem; max-width: 600px; }
+  .ms-ring-wrap { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
+  .progress-ring { width: 80px; height: 80px; transform: rotate(-90deg); }
+  .progress-ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 5; }
+  .progress-ring-fg { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset 1s ease; animation: ring-fill 1.2s ease forwards; }
+  .ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
+
+  .ms-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.5rem; }
+  .ms-mini-stat {
+    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; text-align: center;
+  }
+  .ms-mini-val { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em; }
+  .ms-mini-lbl { display: block; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.1rem; }
+
+  .section-title {
+    font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 1rem; margin-top: 1.5rem; padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .empty-msg { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
+
+  .phase-card {
+    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem; transition: border-color 0.2s ease, transform 0.15s ease;
+  }
+  .phase-card:hover { border-color: rgba(255,255,255,0.1); transform: translateX(2px); }
+  .phase-card.phase-active { border-left: 3px solid var(--orange); }
+  .phase-card.phase-done { border-left: 3px solid var(--green); }
+  .phase-card.phase-pending { border-left: 3px solid var(--border); }
+  .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .phase-header h3 { font-size: 0.95rem; font-weight: 500; }
+  .phase-desc { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .phase-completed { font-size: 0.7rem; color: var(--green); margin-bottom: 0.5rem; font-weight: 500; }
+  .badge { font-size: 0.65rem; padding: 0.15rem 0.55rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .badge-phase-done { background: rgba(34,197,94,0.12); color: var(--green); }
+  .badge-phase-active { background: rgba(245,158,11,0.12); color: var(--orange); }
+  .badge-phase-pending { background: rgba(113,113,122,0.12); color: var(--text-muted); }
+  .progress-bar-container { width: 100%; height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 0.35rem; }
+  .progress-bar { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
+  .phase-stats { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+
+  .task-list { list-style: none; padding: 0; }
+  .task-list li { padding: 0.25rem 0; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
+  .task-icon { width: 1.2em; text-align: center; flex-shrink: 0; }
+  .task-done { color: var(--green); }
+  .task-active { color: var(--orange); }
+  .task-pending { color: var(--text-muted); }
+  .no-tasks { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+  .task-list details summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; list-style: none; transition: color 0.15s ease; }
+  .task-list details summary::-webkit-details-marker { display: none; }
+  .task-list details summary:hover { color: var(--text); }
+  .task-list details[open] summary { margin-bottom: 0.35rem; }
+  .task-details { margin-left: 1.7rem; padding: 0.5rem 0.75rem; background: var(--surface-2); border-radius: 6px; font-size: 0.75rem; color: var(--text-muted); }
+  .task-details pre { white-space: pre-wrap; font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; margin-top: 0.25rem; }
+  .task-desc, .task-ac { margin-bottom: 0.35rem; }
+  .no-detail summary { cursor: default; }
+
+  .req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
+  .req-cell { padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.75rem; font-weight: 500; transition: transform 0.15s ease; }
+  .req-cell:hover { transform: translateY(-1px); }
+  .req-covered { background: rgba(34,197,94,0.08); color: var(--green); border: 1px solid rgba(34,197,94,0.15); }
+  .req-uncovered { background: rgba(239,68,68,0.08); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
+
+  .quick-tasks-section { margin-top: 2.5rem; }
+  .quick-tasks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.75rem; }
+  .quick-pr-link { display: inline-block; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent); text-decoration: none; font-weight: 500; transition: color 0.15s ease; }
+  .quick-pr-link:hover { color: var(--blue); text-decoration: underline; }
+
+  .agent-section { margin-top: 3rem; }
+  .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  .agent-card {
+    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    position: relative; overflow: hidden;
+  }
+  .agent-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: var(--agent-color); opacity: 0.6;
+  }
+  .agent-card:hover { border-color: rgba(255,255,255,0.1); transform: translateY(-2px); box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+  .agent-vibe { font-size: 0.7rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.5rem; }
+  .agent-name { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; letter-spacing: -0.01em; }
+  .agent-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 0.75rem; }
+  .agent-badge { display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
   @media (max-width: 1024px) {
     .dash-body { padding: 1.5rem; }
     .dash-header { padding: 1.5rem; }
@@ -1088,8 +913,6 @@ function collectAgentRoster() {
   return agents;
 }
 
-// TODO: generateDashboardHTML is ~810 lines. Break into smaller helpers (CSS builder,
-// section renderers, page assembler) in a future phase to improve maintainability.
 function generateDashboardHTML(data) {
   const {
     projectTitle, projectId, timestamp, progressPercent,
@@ -1102,7 +925,6 @@ function generateDashboardHTML(data) {
   const reqsCovered = reqCoverage.filter(r => r.covered).length;
   const reqsTotal = reqCoverage.length;
 
-  // Use module-level MILESTONE_GRADIENTS constant
   const gradients = MILESTONE_GRADIENTS;
 
   // Determine active milestone index (first in_progress, or first open, or 0)
@@ -1110,16 +932,78 @@ function generateDashboardHTML(data) {
   if (activeMsIdx === -1) activeMsIdx = milestones.findIndex(ms => ms.status === 'open');
   if (activeMsIdx === -1) activeMsIdx = 0;
 
-  // Build milestone tabs HTML
+  // --- Helper: map phase/task status to badge variant ---
+  function statusVariant(status) {
+    if (status === 'closed') return 'done';
+    if (status === 'in_progress') return 'active';
+    return 'pending';
+  }
+  function statusLabel(status) {
+    if (status === 'closed') return 'Done';
+    if (status === 'in_progress') return 'Active';
+    return 'Pending';
+  }
+
+  // --- Stat cards using card() ---
+  function renderStatCard(value, label, colorClass) {
+    return card({
+      className: `stat-card ${colorClass}`,
+      content: `<div class="stat-value">${value}</div><div class="stat-label">${esc(label)}</div>`,
+    });
+  }
+
+  // --- Phase card using card() ---
+  function renderPhaseCard(phase, grad) {
+    const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
+    const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+    const tasksHTML = phase.tasks.map(t => {
+      const icon = t.status === 'closed' ? '&#x2713;' : t.status === 'in_progress' ? '&#x25B6;' : '&#x25CB;';
+      const cls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
+      const hasDetails = t.description || t.acceptance_criteria;
+      const detailsHTML = hasDetails ? `
+              <div class="task-details">
+                ${t.description ? `<div class="task-desc"><strong>Description:</strong> ${esc(t.description)}</div>` : ''}
+                ${t.acceptance_criteria ? `<div class="task-ac"><strong>Acceptance Criteria:</strong><pre>${esc(t.acceptance_criteria)}</pre></div>` : ''}
+              </div>` : '';
+      return `<li class="${cls}">
+              <details${hasDetails ? '' : ' class="no-detail"'}>
+                <summary><span class="task-icon">${icon}</span> ${esc(t.title)} <code>${t.id}</code></summary>
+                ${detailsHTML}
+              </details>
+            </li>`;
+    }).join('\n');
+    const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
+    const completionHTML = phase.status === 'closed'
+      ? `<div class="phase-completed">${phase.completed_at ? `Completed ${new Date(phase.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'Completed'}</div>`
+      : '';
+    const gradBg = grad ? `linear-gradient(90deg,${grad[0]},${grad[1]})` : 'var(--accent)';
+
+    return card({
+      className: `phase-card ${statusClass}`,
+      content: `<div class="phase-header">
+              <h3>${esc(phase.title)}</h3>
+              ${badge(statusLabel(phase.status), statusVariant(phase.status))}
+            </div>
+            ${phaseDescHTML}
+            ${completionHTML}
+            <div class="progress-bar-container">
+              <div class="progress-bar" style="width:${pct}%;background:${gradBg}"></div>
+            </div>
+            <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks &middot; ${pct}%</div>
+            ${phase.tasks.length > 0 ? `<ul class="task-list">${tasksHTML}</ul>` : '<p class="no-tasks">No tasks</p>'}`,
+    });
+  }
+
+  // --- Milestone tabs using ds-tab classes ---
   const milestoneTabsHTML = milestones.map((ms, i) => {
     const grad = gradients[i % gradients.length];
     const isActive = i === activeMsIdx;
     const isDone = ms.status === 'closed';
     const checkmark = isDone ? '<span class="tab-check">&#x2713;</span>' : '';
-    return `<button class="ms-tab${isActive ? ' active' : ''}" data-tab="${i}" style="--tab-c1:${grad[0]};--tab-c2:${grad[1]}">${checkmark}${esc(ms.title)}</button>`;
+    return `<button class="ds-tab${isActive ? ' ds-tab-active' : ''}" data-ds-tab="${i}" style="--tab-c1:${grad[0]};--tab-c2:${grad[1]}">${checkmark}${esc(ms.title)}</button>`;
   }).join('\n      ');
 
-  // Build milestone panels
+  // --- Milestone panels ---
   const milestonePanelsHTML = milestones.map((ms, i) => {
     const grad = gradients[i % gradients.length];
     const isActive = i === activeMsIdx;
@@ -1127,77 +1011,39 @@ function generateDashboardHTML(data) {
     const msReqs = ms.requirements || [];
     const msCoveredReqs = msReqs.filter(r => r.covered).length;
 
-    // Phase cards for this milestone
-    const phaseCardsHTML = msPhases.map((phase) => {
-      const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
-      const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
-      const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
-      const tasksHTML = phase.tasks.map(t => {
-        const icon = t.status === 'closed' ? '&#x2713;' : t.status === 'in_progress' ? '&#x25B6;' : '&#x25CB;';
-        const cls = t.status === 'closed' ? 'task-done' : t.status === 'in_progress' ? 'task-active' : 'task-pending';
-        const hasDetails = t.description || t.acceptance_criteria;
-        const detailsHTML = hasDetails ? `
-              <div class="task-details">
-                ${t.description ? `<div class="task-desc"><strong>Description:</strong> ${esc(t.description)}</div>` : ''}
-                ${t.acceptance_criteria ? `<div class="task-ac"><strong>Acceptance Criteria:</strong><pre>${esc(t.acceptance_criteria)}</pre></div>` : ''}
-              </div>` : '';
-        return `<li class="${cls}">
-              <details${hasDetails ? '' : ' class="no-detail"'}>
-                <summary><span class="task-icon">${icon}</span> ${esc(t.title)} <code>${t.id}</code></summary>
-                ${detailsHTML}
-              </details>
-            </li>`;
-      }).join('\n');
-      const phaseDescHTML = phase.description ? `<p class="phase-desc">${esc(phase.description)}</p>` : '';
-      const completionHTML = phase.status === 'closed'
-        ? `<div class="phase-completed">${phase.completed_at ? `Completed ${new Date(phase.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'Completed'}</div>`
-        : '';
-      return `
-          <div class="phase-card ${statusClass}">
-            <div class="phase-header">
-              <h3>${esc(phase.title)}</h3>
-              <span class="badge badge-${statusClass}">${statusBadge}</span>
-            </div>
-            ${phaseDescHTML}
-            ${completionHTML}
-            <div class="progress-bar-container">
-              <div class="progress-bar" style="width:${pct}%;background:linear-gradient(90deg,${grad[0]},${grad[1]})"></div>
-            </div>
-            <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks &middot; ${pct}%</div>
-            ${phase.tasks.length > 0 ? `<ul class="task-list">${tasksHTML}</ul>` : '<p class="no-tasks">No tasks</p>'}
-          </div>`;
-    }).join('\n');
+    const phaseCardsHTML = msPhases.map(phase => renderPhaseCard(phase, grad)).join('\n');
 
-    // Requirements for this milestone
     const msReqGridHTML = msReqs.map(r => {
       const cls = r.covered ? 'req-covered' : 'req-uncovered';
-      return `<div class="req-cell ${cls}" title="${esc(r.title)} (${r.id})${r.covered ? ' — ' + r.covering_tasks + ' tasks' : ' — UNCOVERED'}">${esc(r.title.length > 30 ? r.title.slice(0, 28) + '\u2026' : r.title)}</div>`;
+      return `<div class="req-cell ${cls}" title="${esc(r.title)} (${r.id})${r.covered ? ' \u2014 ' + r.covering_tasks + ' tasks' : ' \u2014 UNCOVERED'}">${esc(r.title.length > 30 ? r.title.slice(0, 28) + '\u2026' : r.title)}</div>`;
     }).join('\n');
 
-    return `
-      <div class="ms-panel${isActive ? ' active' : ''}" data-panel="${i}">
-        <div class="ms-header" style="--ms-c1:${grad[0]};--ms-c2:${grad[1]}">
-          <div class="ms-header-content">
+    // Milestone header using card()
+    const msHeaderHTML = card({
+      className: 'ms-header',
+      style: `--ms-c1:${grad[0]};--ms-c2:${grad[1]}`,
+      content: `<div class="ms-header-content">
             <h2>${esc(ms.title)}</h2>
             ${ms.goal ? `<p class="ms-goal">${esc(ms.goal)}</p>` : ''}
           </div>
-          <div class="ms-ring-wrap">
-            <svg class="progress-ring" viewBox="0 0 80 80">
-              <circle class="progress-ring-bg" cx="40" cy="40" r="34" />
-              <circle class="progress-ring-fg" cx="40" cy="40" r="34"
-                stroke-dasharray="${Math.round(2 * Math.PI * 34)}"
-                stroke-dashoffset="${Math.round(2 * Math.PI * 34 * (1 - ms.progress / 100))}"
-                style="stroke:${grad[0]}" />
-            </svg>
-            <span class="ring-label">${ms.progress}%</span>
-          </div>
-        </div>
-        <div class="ms-stats-row">
-          <div class="ms-mini-stat"><span class="ms-mini-val">${ms.phase_count}</span><span class="ms-mini-lbl">Phases</span></div>
-          <div class="ms-mini-stat"><span class="ms-mini-val">${ms.completed_count}</span><span class="ms-mini-lbl">Done</span></div>
-          <div class="ms-mini-stat"><span class="ms-mini-val">${msReqs.length}</span><span class="ms-mini-lbl">Reqs</span></div>
-          <div class="ms-mini-stat"><span class="ms-mini-val">${msCoveredReqs}</span><span class="ms-mini-lbl">Covered</span></div>
-        </div>
+          ${progressRing({ percent: ms.progress, size: 80, strokeWidth: 5, color: grad[0] })}`,
+    });
+
+    // Mini-stat cards using card()
+    const miniStats = [
+      { val: ms.phase_count, lbl: 'Phases' },
+      { val: ms.completed_count, lbl: 'Done' },
+      { val: msReqs.length, lbl: 'Reqs' },
+      { val: msCoveredReqs, lbl: 'Covered' },
+    ].map(s => card({
+      className: 'ms-mini-stat',
+      content: `<span class="ms-mini-val">${s.val}</span><span class="ms-mini-lbl">${esc(s.lbl)}</span>`,
+    })).join('\n');
+
+    return `
+      <div class="ds-tab-panel${isActive ? ' ds-tab-panel-active' : ''}" data-ds-panel="${i}">
+        ${msHeaderHTML}
+        <div class="ms-stats-row">${miniStats}</div>
         <div class="ms-body">
           <h3 class="section-title">Phases</h3>
           ${phaseCardsHTML || '<p class="empty-msg">No phases in this milestone</p>'}
@@ -1208,46 +1054,46 @@ function generateDashboardHTML(data) {
       </div>`;
   }).join('\n');
 
-  // Agent roster
+  // --- Agent roster using card() ---
   const agentCardsHTML = agents.map(a => {
     const colorVal = a.color || SAFE_FALLBACK_COLOR;
     const mapped = COLOR_MAP[colorVal.toLowerCase()];
-    // Validate: must be a known named color or a valid hex color
     const resolvedColor = mapped || (HEX_COLOR_RE.test(colorVal) ? colorVal : SAFE_FALLBACK_COLOR);
-    return `
-        <div class="agent-card" style="--agent-color:${resolvedColor}">
-          <div class="agent-vibe">${esc(a.vibe)}</div>
+    return card({
+      className: 'agent-card',
+      style: `--agent-color:${resolvedColor}`,
+      content: `<div class="agent-vibe">${esc(a.vibe)}</div>
           <div class="agent-name">${esc(a.name)}</div>
           <div class="agent-desc">${esc(a.description)}</div>
-          <span class="agent-badge" style="background:${resolvedColor}20;color:${resolvedColor};border:1px solid ${resolvedColor}40">${esc(a.color || 'default')}</span>
-        </div>`;
+          <span class="agent-badge" style="background:${resolvedColor}20;color:${resolvedColor};border:1px solid ${resolvedColor}40">${esc(a.color || 'default')}</span>`,
+    });
   }).join('\n');
 
-  // Quick task cards
+  // --- Quick task cards using card() + badge() ---
   const quickTaskCardsHTML = quickTasks.map(qt => {
     const statusClass = qt.status === 'closed' ? 'phase-done' : qt.status === 'in_progress' ? 'phase-active' : 'phase-pending';
-    const statusBadge = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
+    const qtLabel = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
     const childrenHTML = qt.children.length > 0 ? `<ul class="task-list">${qt.children.map(c => `<li class="${c.status === 'closed' ? 'task-done' : 'task-pending'}"><span class="task-icon">${c.status === 'closed' ? '&#x2713;' : '&#x25CB;'}</span> ${esc(c.title)}</li>`).join('\n')}</ul>` : '';
     const prLinkHTML = qt.prUrl && /^https?:\/\//i.test(qt.prUrl) ? `<a href="${esc(qt.prUrl)}" class="quick-pr-link" target="_blank" rel="noopener">View PR</a>` : '';
-    return `
-          <div class="phase-card ${statusClass}">
-            <div class="phase-header">
+    return card({
+      className: `phase-card ${statusClass}`,
+      content: `<div class="phase-header">
               <h3>${esc(qt.title)}</h3>
-              <span class="badge badge-${statusClass}">${statusBadge}</span>
+              ${badge(qtLabel, statusVariant(qt.status))}
             </div>
             ${qt.description ? `<p class="phase-desc">${esc(qt.description)}</p>` : ''}
             ${childrenHTML}
-            ${prLinkHTML}
-          </div>`;
+            ${prLinkHTML}`,
+    });
   }).join('\n');
 
-  // Overall SVG progress rings data
+  // --- Overall SVG progress rings using progressRing() ---
   const phaseRingPct = progressPercent;
   const reqRingPct = reqsTotal > 0 ? Math.round((reqsCovered / reqsTotal) * 100) : 0;
-  const circumference = Math.round(2 * Math.PI * 54);
+  const reqRingColor = reqRingPct >= 80 ? '#22c55e' : reqRingPct >= 50 ? '#f59e0b' : '#ef4444';
 
-  // Use module-level DASHBOARD_BASE_CSS constant (shared with interactive dashboard)
-  const dashExtraCSS = DASHBOARD_BASE_CSS;
+  // Use COMPONENT_CSS (design-system) + page-specific DASHBOARD_BASE_CSS
+  const dashExtraCSS = COMPONENT_CSS + '\n' + DASHBOARD_BASE_CSS;
 
   const dashBodyHTML = `
 <header class="dash-header">
@@ -1259,68 +1105,38 @@ function generateDashboardHTML(data) {
 
   <!-- Overview stat cards -->
   <div class="overview-grid">
-    <div class="stat-card accent" style="--card-accent:var(--accent)">
-      <div class="stat-value">${totalPhases}</div>
-      <div class="stat-label">Total Phases</div>
-    </div>
-    <div class="stat-card green">
-      <div class="stat-value">${completedPhases}</div>
-      <div class="stat-label">Completed</div>
-    </div>
-    <div class="stat-card orange">
-      <div class="stat-value">${phasesInProgress}</div>
-      <div class="stat-label">In Progress</div>
-    </div>
-    <div class="stat-card blue">
-      <div class="stat-value">${reqsTotal}</div>
-      <div class="stat-label">Requirements</div>
-    </div>
+    ${renderStatCard(totalPhases, 'Total Phases', 'accent')}
+    ${renderStatCard(completedPhases, 'Completed', 'green')}
+    ${renderStatCard(phasesInProgress, 'In Progress', 'orange')}
+    ${renderStatCard(reqsTotal, 'Requirements', 'blue')}
   </div>
 
   <!-- SVG Progress Rings -->
   <div class="charts-row">
-    <div class="chart-card">
-      <div class="ring-container" style="--ring-circumference:${circumference}">
-        <svg viewBox="0 0 120 120">
-          <circle class="ring-bg" cx="60" cy="60" r="54" />
-          <circle class="ring-fg" cx="60" cy="60" r="54"
-            stroke="${'#22c55e'}"
-            stroke-dasharray="${circumference}"
-            stroke-dashoffset="${Math.round(circumference * (1 - phaseRingPct / 100))}"
-            style="--ring-circumference:${circumference}" />
-        </svg>
-        <span class="ring-pct">${phaseRingPct}%</span>
-      </div>
+    ${card({
+      className: 'chart-card',
+      content: `${progressRing({ percent: phaseRingPct, size: 120, strokeWidth: 6, color: '#22c55e' })}
       <div>
         <h3>Phase Completion</h3>
         <div class="chart-value">${completedPhases} / ${totalPhases}</div>
         <div class="chart-sub">${phasesInProgress} in progress, ${phasesOpen} open</div>
-      </div>
-    </div>
-    <div class="chart-card">
-      <div class="ring-container" style="--ring-circumference:${circumference}">
-        <svg viewBox="0 0 120 120">
-          <circle class="ring-bg" cx="60" cy="60" r="54" />
-          <circle class="ring-fg" cx="60" cy="60" r="54"
-            stroke="${reqRingPct >= 80 ? '#22c55e' : reqRingPct >= 50 ? '#f59e0b' : '#ef4444'}"
-            stroke-dasharray="${circumference}"
-            stroke-dashoffset="${Math.round(circumference * (1 - reqRingPct / 100))}"
-            style="--ring-circumference:${circumference}" />
-        </svg>
-        <span class="ring-pct">${reqRingPct}%</span>
-      </div>
+      </div>`,
+    })}
+    ${card({
+      className: 'chart-card',
+      content: `${progressRing({ percent: reqRingPct, size: 120, strokeWidth: 6, color: reqRingColor })}
       <div>
         <h3>Requirement Coverage</h3>
         <div class="chart-value">${reqsCovered} / ${reqsTotal}</div>
         <div class="chart-sub">${reqsTotal - reqsCovered} uncovered</div>
-      </div>
-    </div>
+      </div>`,
+    })}
   </div>
 
   <!-- Milestone tabs -->
   ${milestones.length > 0 ? `
-  <div class="ms-tabs-container">
-    <div class="ms-tabs-nav">
+  <div class="ds-tabs-container">
+    <div class="ds-tabs-nav">
       ${milestoneTabsHTML}
     </div>
     ${milestonePanelsHTML}
@@ -1329,12 +1145,12 @@ function generateDashboardHTML(data) {
   ${phaseDetails.map((phase) => {
     const pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
     const statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
-    const statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
-    return `<div class="phase-card ${statusClass}">
-      <div class="phase-header"><h3>${esc(phase.title)}</h3><span class="badge badge-${statusClass}">${statusBadge}</span></div>
+    return card({
+      className: `phase-card ${statusClass}`,
+      content: `<div class="phase-header"><h3>${esc(phase.title)}</h3>${badge(statusLabel(phase.status), statusVariant(phase.status))}</div>
       <div class="progress-bar-container"><div class="progress-bar" style="width:${pct}%;background:var(--accent)"></div></div>
-      <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks</div>
-    </div>`;
+      <div class="phase-stats">${phase.tasks_closed}/${phase.tasks_total} tasks</div>`,
+    });
   }).join('\n')}
   `}
 
@@ -1359,15 +1175,15 @@ function generateDashboardHTML(data) {
 </div>
 
 <script>
-  // Tab switching
-  document.querySelectorAll('.ms-tab').forEach(function(tab) {
+  // Tab switching (uses ds-tab/ds-tab-panel classes from design-system)
+  document.querySelectorAll('.ds-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
-      var idx = this.getAttribute('data-tab');
-      document.querySelectorAll('.ms-tab').forEach(function(t) { t.classList.remove('active'); });
-      document.querySelectorAll('.ms-panel').forEach(function(p) { p.classList.remove('active'); });
-      this.classList.add('active');
-      var panel = document.querySelector('.ms-panel[data-panel="' + idx + '"]');
-      if (panel) panel.classList.add('active');
+      var idx = this.getAttribute('data-ds-tab');
+      document.querySelectorAll('.ds-tab').forEach(function(t) { t.classList.remove('ds-tab-active'); });
+      document.querySelectorAll('.ds-tab-panel').forEach(function(p) { p.classList.remove('ds-tab-panel-active'); });
+      this.classList.add('ds-tab-active');
+      var panel = document.querySelector('.ds-tab-panel[data-ds-panel="' + idx + '"]');
+      if (panel) panel.classList.add('ds-tab-panel-active');
     });
   });
 <\/script>`;
@@ -1507,8 +1323,8 @@ function generateInteractiveDashboardHTML(data) {
   // Use module-level MILESTONE_GRADIENTS constant (shared with static dashboard)
   const gradients = MILESTONE_GRADIENTS;
 
-  // Use DASHBOARD_BASE_CSS plus interactive-specific overrides (flex header, action buttons)
-  const dashExtraCSS = DASHBOARD_BASE_CSS + `
+  // Use DASHBOARD_INTERACTIVE_CSS (full legacy CSS) plus interactive-specific overrides
+  const dashExtraCSS = DASHBOARD_INTERACTIVE_CSS + `
   /* --- Interactive-only: flex header layout for action buttons --- */
   .dash-header {
     display: flex;
