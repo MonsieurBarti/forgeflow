@@ -32,7 +32,7 @@ const SETTINGS_DEFAULTS = {
   parallel_execution: true,
   quality_gate: true,
   require_tests: true,
-  web_ui: true,
+  web_ui: false,
   shift_left_gates: true,
   shift_left_enforcement: 'advisory',
 };
