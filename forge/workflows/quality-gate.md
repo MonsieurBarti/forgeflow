@@ -78,6 +78,10 @@ Audit the following changed files for performance anti-patterns.
 <CHANGED_FILES>
 </changed_files>
 
+N+1 subprocess filter: Skip any N+1 findings for bd CLI subprocess calls (bd, bdArgs,
+bdJson, bdJsonArgs helper functions). The bd CLI has no batch query API, so sequential
+invocations cannot be optimized and these findings are false positives.
+
 Scope your analysis to these files only. Output your findings as raw JSON conforming to
 agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")

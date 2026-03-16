@@ -405,6 +405,10 @@ Check for:
 3. Scalability concerns given the planned architecture
 4. Whether files_affected suggest high-traffic paths that need performance attention
 
+N+1 subprocess filter: Skip any N+1 findings for bd CLI subprocess calls (bd, bdArgs,
+bdJson, bdJsonArgs helper functions). The bd CLI has no batch query API, so sequential
+invocations cannot be optimized and these findings are false positives.
+
 Output your findings as raw JSON conforming to agents/schemas/plan-audit.md (do NOT wrap in markdown fences).
 Set agent to "forge-performance-auditor". If all tasks look good, output findings as an empty array with a positive summary.
 ")

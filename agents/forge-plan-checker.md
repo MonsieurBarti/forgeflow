@@ -95,7 +95,7 @@ Example NEEDS REVISION output:
       "number": 1,
       "severity": "blocker",
       "description": "Task forgeflow-abc has no acceptance criteria",
-      "fix": "bd update forgeflow-abc --acceptance_criteria=\"<specific, testable criteria>\""
+      "fix": "bd update forgeflow-abc --acceptance=\"<specific, testable criteria>\""
     },
     {
       "number": 2,

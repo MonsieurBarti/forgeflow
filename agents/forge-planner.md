@@ -66,7 +66,7 @@ For each task:
 ```bash
 bd create --title="<title>" \
   --description="<what to implement>" \
-  --acceptance_criteria="<specific, testable criteria>" \
+  --acceptance="<specific, testable criteria>" \
   --type=task --priority=2 --json
 bd dep add <task-id> <phase-id> --type=parent-child
 bd label add <task-id> forge:task
