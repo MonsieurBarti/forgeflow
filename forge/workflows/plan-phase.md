@@ -673,12 +673,41 @@ Stop the workflow. Suggest:
 bd update <phase-id> --status=in_progress
 ```
 
-Create a dedicated branch:
+### Resolve milestone branch and create phase worktree
+
+Look up the phase's parent milestone by traversing the bead graph:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
+PARENT_DEPS=$(bd dep list <phase-id> --direction=up --type=parent-child --json)
 ```
 
-Creates `forge/m<milestone-id>/phase-<phase-id>`. If branch exists, command is idempotent. Without a milestone parent, creates `forge/phase-<phase-id>`.
+Parse the JSON result. Find the bead with `forge:milestone` label:
+```bash
+# For each parent dep, check if it has forge:milestone label
+bd show <parent-id> --json
+```
+
+If a milestone parent is found, derive the milestone branch name:
+```
+MILESTONE_BRANCH=forge/milestone-<milestone-id>
+```
+
+Create a worktree for this phase based on the milestone branch:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task <phase-id> --prefix=phase --base=forge/milestone-<milestone-id>
+```
+
+This creates:
+- Worktree at `.forge/worktrees/phase-<phase-id>`
+- Branch `forge/phase-<phase-id>` based on the milestone branch
+
+The command is idempotent -- if the worktree already exists, it reports success.
+
+**No-milestone fallback:** If no milestone parent is found, fall back to main:
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task <phase-id> --prefix=phase --base=main
+```
+
+This creates the same worktree structure (`forge/phase-<phase-id>`) but based on main.
 
 Suggest next step: `/forge:execute <phase-number>` or `/forge:plan <next-phase>`.
 

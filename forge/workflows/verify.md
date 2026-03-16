@@ -198,11 +198,34 @@ Use the cached settings from Step 3b.
 - If `quality_gate` is `false`: skip, proceed to step 8 (step 7 self-skips when quality gate was not run).
 - If `true` (or not explicitly false): run quality gate pipeline.
 
+**Resolve milestone branch for merge-base:**
+
+Look up the phase's parent milestone by traversing the bead graph:
+```bash
+PARENT_DEPS=$(bd dep list <phase-id> --direction=up --type=parent-child --json)
+```
+
+Parse the JSON result. Find the bead with `forge:milestone` label:
+```bash
+# For each parent dep, check if it has forge:milestone label
+bd show <parent-id> --json
+```
+
+If a milestone parent is found, use the milestone branch as the diff base:
+```
+DIFF_BASE_BRANCH=forge/milestone-<milestone-id>
+```
+
+If no milestone parent is found, fall back to main:
+```
+DIFF_BASE_BRANCH=main
+```
+
 **Scope changed files:**
 ```bash
-BASE=$(git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null || true)
+BASE=$(git merge-base HEAD "$DIFF_BASE_BRANCH" 2>/dev/null || true)
 if [ -z "$BASE" ]; then
-  echo "WARNING: Could not determine merge-base (neither main nor master found). Skipping quality gate."
+  echo "WARNING: Could not determine merge-base against $DIFF_BASE_BRANCH. Skipping quality gate."
   # Skip quality gate entirely rather than diffing the entire repo
 fi
 CHANGED_FILES=$(git diff --name-only "$BASE"..HEAD)
@@ -342,6 +365,23 @@ Report auto-closed requirements. Skip reqs with no `validates` links.
 
 After phase closure and coverage check, push and open PR. Forge NEVER merges -- user reviews and merges.
 
+The PR targets the milestone branch so that phase work merges into the milestone, not directly
+into main. The milestone branch is merged to main when the milestone is completed.
+
+### Resolve milestone branch for PR base
+
+Reuse the milestone resolution from step 6 (same traversal). If a milestone parent was found:
+```
+PR_BASE=forge/milestone-<milestone-id>
+```
+
+If no milestone parent was found, fall back to main:
+```
+PR_BASE=main
+```
+
+### Push and create PR
+
 ```bash
 BRANCH=$(git branch --show-current)
 node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push "$BRANCH"
@@ -350,10 +390,11 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push "$BRANCH"
 If no commits on branch, skip PR creation.
 
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" pr-create <phase-id>
+node "$HOME/.claude/forge/bin/forge-tools.cjs" pr-create <phase-id> --base=$PR_BASE
 ```
 
-PR description auto-generated with phase goal, tasks, and coverage. If PR exists, reports existing URL gracefully.
+The `--base` flag tells pr-create to target the milestone branch instead of main. PR description
+is auto-generated with phase goal, tasks, and coverage. If PR exists, reports existing URL gracefully.
 
 Display PR URL:
 > The PR is ready for your review. Forge does not merge -- please review, approve, and merge when satisfied. Run `/forge:plan <next-phase>` to continue.
