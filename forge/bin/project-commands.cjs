@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  bd, bdArgs, bdJson, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
+  bd, bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
   collectMilestoneRequirements,
   GLOBAL_SETTINGS_PATH, PROJECT_SETTINGS_NAME,
   SETTINGS_DEFAULTS, SETTINGS_DESCRIPTIONS, SETTINGS_ENUMS,
@@ -2627,7 +2627,7 @@ module.exports = {
       }
     }
     // Phases that are children of milestones are also known to have parents
-    // (they were fetched via bdJson(`children ${ms.id}`) in the milestone traversal above).
+    // (they were fetched via bdJsonArgs(['children', ms.id]) in the milestone traversal above).
 
     const orphans = [];
     const forgeBeads = [

@@ -5,7 +5,7 @@
  * core.cjs -- Shared helpers and constants for forge-tools modules.
  *
  * Exports: parseSimpleYaml, toSimpleYaml, parseFrontmatter, writeFrontmatter,
- *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJson, git, gh,
+ *          isDoltConnectionError, restartDolt, bd, bdArgs, bdJsonArgs, git, gh,
  *          output, forgeError, validateId, resolveAgentModel, loadModelProfile,
  *          loadModelOverrides, findGitRoot, resolveSettings, resolveSettingsPath,
  *          deepMerge, and all constants.
@@ -257,36 +257,7 @@ function git(args, opts = {}) {
 }
 
 /**
- * @deprecated Use bdJsonArgs() instead. bdJson() constructs the command via
- * string interpolation which is vulnerable to command injection. bdJsonArgs()
- * accepts an array of arguments and avoids shell interpretation entirely.
- */
-function bdJson(args) {
-  const raw = bd(`${args} --json`);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (args.startsWith('show ') && Array.isArray(parsed)) {
-      return parsed[0] !== undefined ? parsed[0] : null;
-    }
-    return parsed;
-  } catch {
-    // INTENTIONALLY SOFT FAILURE: bd sometimes returns non-JSON output (e.g. error
-    // messages, empty results). Callers check for null and handle accordingly.
-    // Raw output redacted to prevent sensitive data leaking to stderr.
-    if (process.env.FORGE_DEBUG) {
-      const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
-      console.error('[bdJson] Parse failure for:', args.split(/\s+/)[0], 'raw:', truncated);
-    } else {
-      const cmdName = args.split(/\s+/)[0] || 'unknown';
-      console.error(`[bdJson] JSON parse failure for command "${cmdName}" (${raw.length} bytes)`);
-    }
-    return null;
-  }
-}
-
-/**
- * Like bdJson() but accepts an array of arguments (safe from injection).
+ * Execute a bd command with --json and parse the result.
  * Appends --json to the argument list.
  */
 function bdJsonArgs(argList) {
@@ -299,7 +270,7 @@ function bdJsonArgs(argList) {
     }
     return parsed;
   } catch {
-    // INTENTIONALLY SOFT FAILURE: same rationale as bdJson -- callers check for null.
+    // INTENTIONALLY SOFT FAILURE: callers check for null and handle accordingly.
     // Raw output redacted to prevent sensitive data leaking to stderr.
     if (process.env.FORGE_DEBUG) {
       const truncated = raw.length > 200 ? raw.slice(0, 200) + '...' : raw;
@@ -329,7 +300,7 @@ function gh(args, opts = {}) {
 }
 
 /**
- * Normalize the result of bdJson('children ...') into a flat array.
+ * Normalize the result of bdJsonArgs(['children', id]) into a flat array.
  * bd may return an array directly, or an object with .issues / .children.
  */
 function normalizeChildren(raw) {
@@ -672,7 +643,6 @@ module.exports = {
   // Exec helpers
   bd,
   bdArgs,
-  bdJson,
   bdJsonArgs,
   git,
   gh,
