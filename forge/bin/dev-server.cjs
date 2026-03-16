@@ -118,7 +118,7 @@ async function serveAndAwaitDecision({ html, timeout = 1800000, title, routes } 
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
-        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
       });
