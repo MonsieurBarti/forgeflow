@@ -637,19 +637,6 @@ PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 
 Show tasks, acceptance criteria, requirement links, and execution order (waves).
 
-## 6.5. Display Cost Estimate
-
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-estimate <phase-id>
-```
-
-Display to user. Best-effort -- if command fails, skip silently.
-
-If `estimated_cost_usd` is not null, display:
-> Estimated phase cost: $\<cost\> (\<confidence\> confidence, based on \<N\> phase(s))
-
-If null or the command fails, skip silently.
-
 ## 6.7. Interactive Plan Review & Approval Gate
 
 Present the plan to the user for review and approval. This is a **hard gate** — the user
