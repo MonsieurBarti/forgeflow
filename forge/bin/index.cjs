@@ -12,6 +12,7 @@ const gitCommands = require('./git-commands.cjs');
 const roadmapCommands = require('./roadmap-commands.cjs');
 const qualityGateCommands = require('./quality-gate-commands.cjs');
 const cleanupCommands = require('./cleanup-commands.cjs');
+const changelogCommands = require('./changelog-commands.cjs');
 
 const commands = Object.assign(
   {},
@@ -20,7 +21,8 @@ const commands = Object.assign(
   gitCommands,
   roadmapCommands,
   qualityGateCommands,
-  cleanupCommands
+  cleanupCommands,
+  changelogCommands
 );
 
 const [command, ...args] = process.argv.slice(2);
