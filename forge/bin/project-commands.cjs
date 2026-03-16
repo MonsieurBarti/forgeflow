@@ -3336,7 +3336,7 @@ module.exports = {
 
   /**
    * Session orientation status: project, milestone, phase, tasks, context,
-   * cost data, and suggested next action in a single JSON payload.
+   * and suggested next action in a single JSON payload.
    *
    * Usage: forge-tools status [project-id]
    */
