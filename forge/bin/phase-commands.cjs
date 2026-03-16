@@ -20,6 +20,7 @@ const {
 } = require('./core.cjs');
 const { serveAndAwaitDecision } = require('./dev-server.cjs');
 const { esc, COMPONENT_CSS, wrapPage, card, badge, tabs } = require('./design-system.cjs');
+const { validate } = require('../schemas/schemas.cjs');
 
 /**
  * Detect build and test commands for the current project.
@@ -1299,6 +1300,8 @@ module.exports = {
       next_steps: ctx.next_steps || [],
       timestamp: new Date().toISOString(),
     };
+
+    validate('context-write-envelope', schema);
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-'));
     const tmpFile = path.join(tmpDir, 'ctx.json');

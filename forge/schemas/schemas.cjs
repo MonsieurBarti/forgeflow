@@ -740,6 +740,40 @@ const SCHEMAS = {
     releaseUrl: req('string',  'GitHub release URL'),
     reason:     opt('string',  'Why creation was skipped'),
   },
+
+  // =========================================================================
+  // Agent response schemas
+  // =========================================================================
+
+  'audit-findings': {
+    _description: 'Structured audit findings from quality-gate and architect agents',
+    _module: 'agent-response',
+    agent:    req('string', 'Agent name that produced the findings (e.g. forge-quality-gate, forge-architect)'),
+    findings: req('array',  'Array of finding objects: [{task?: string, file?: string, severity: "critical"|"high"|"medium"|"low"|"info", title: string, description: string, recommendation: string, category?: string}]'),
+    summary:  req('object', 'Summary counts: {total: number, by_severity: {critical?: number, high?: number, medium?: number, low?: number, info?: number}}'),
+  },
+
+  'context-write-envelope': {
+    _description: 'Structured context envelope written by agents to phase beads',
+    _module: 'agent-response',
+    agent:      req('string', 'Agent name that wrote the context'),
+    task:       opt('string', 'Task bead ID if context is task-scoped'),
+    status:     req('string', 'Completion status (e.g. completed, failed, blocked)'),
+    findings:   opt('array',  'Array of finding objects'),
+    decisions:  opt('array',  'Array of decision objects'),
+    blockers:   opt('array',  'Array of blocker objects'),
+    artifacts:  opt('array',  'Array of artifact objects'),
+    next_steps: opt('array',  'Array of next-step strings or objects'),
+    timestamp:  req('string', 'ISO 8601 timestamp of when context was written'),
+  },
+
+  'plan-audit': {
+    _description: 'Plan-time audit response from architect or quality-gate agents',
+    _module: 'agent-response',
+    agent:    req('string', 'Agent name that produced the audit'),
+    findings: req('array',  'Array of finding objects: [{task: string, severity: "critical"|"high"|"medium"|"low"|"info", title: string, description: string, recommendation: string}]'),
+    summary:  req('string', 'Human-readable summary of the audit results'),
+  },
 };
 
 // --- Schema Names ---
