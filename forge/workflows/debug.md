@@ -69,6 +69,31 @@ DEBUGGER_MODEL=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" model-for-role d
 ```
 
 Report: `Debug session created: ${DEBUG_ID} -- ${SLUG}`
+
+Detect active milestone (determines worktree base and PR target):
+```bash
+MILESTONE_ID=$(bd memories forge:session:last-milestone 2>/dev/null || echo "")
+```
+
+- If `$MILESTONE_ID` is non-empty, check that the bead has the `forge:milestone` label to confirm it is valid.
+- Set `$BASE_BRANCH`:
+  - With milestone: `forge/milestone-${MILESTONE_ID}`
+  - Without milestone: `main`
+
+Create worktree for git isolation:
+```bash
+# With milestone:
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task $DEBUG_ID --prefix=debug --base=forge/milestone-${MILESTONE_ID}
+
+# Without milestone:
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task $DEBUG_ID --prefix=debug --base=main
+```
+
+Parse the JSON result for `path` (the worktree directory) and `branch`. Store `$WORKTREE_PATH` and `$DEBUG_BRANCH`.
+
+If worktree creation fails, warn but continue (fall back to current working directory).
+
+All subsequent debugger work happens inside `$WORKTREE_PATH`.
 </step>
 
 <step name="spawn_debugger">
@@ -100,6 +125,18 @@ reproduction: ${REPRODUCTION}
 timeline: ${TIMELINE}
 </symptoms>
 
+<git_isolation>
+Working directory: ${WORKTREE_PATH}
+Branch: ${DEBUG_BRANCH}
+
+IMPORTANT: All file reads, edits, and commands must use the worktree directory: ${WORKTREE_PATH}.
+Before committing any changes, verify you are on the ${DEBUG_BRANCH} branch by running:
+  git -C ${WORKTREE_PATH} branch --show-current
+If you are NOT on ${DEBUG_BRANCH}, do NOT commit. Report as a blocker.
+Use git add <specific files> -- never git add . or git add -A.
+NEVER run git merge or gh pr merge.
+</git_isolation>
+
 <mode>
 symptoms_prefilled: true
 goal: find_and_fix
@@ -120,7 +157,17 @@ Parse the agent's structured return:
 
 **If `## DEBUG COMPLETE`:**
 - Display completion summary (root cause, fix, verification, commit)
-- Report session closed
+- Push branch and create PR:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push ${DEBUG_BRANCH}
+PR_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-pr-create $DEBUG_ID --base=${BASE_BRANCH})
+```
+
+The `--base` flag targets the PR at the milestone branch (or `main` if no milestone).
+Best-effort: if PR creation fails, warn and continue.
+
+- Report session closed, display PR URL if available
 
 **If `## CHECKPOINT REACHED`:**
 - Present checkpoint details to user
@@ -157,6 +204,18 @@ Load state from bead: bd show ${DEBUG_ID} --json
 **Response:** ${USER_RESPONSE}
 </checkpoint_response>
 
+<git_isolation>
+Working directory: ${WORKTREE_PATH}
+Branch: ${DEBUG_BRANCH}
+
+IMPORTANT: All file reads, edits, and commands must use the worktree directory: ${WORKTREE_PATH}.
+Before committing any changes, verify you are on the ${DEBUG_BRANCH} branch by running:
+  git -C ${WORKTREE_PATH} branch --show-current
+If you are NOT on ${DEBUG_BRANCH}, do NOT commit. Report as a blocker.
+Use git add <specific files> -- never git add . or git add -A.
+NEVER run git merge or gh pr merge.
+</git_isolation>
+
 <mode>
 goal: find_and_fix
 </mode>
@@ -172,8 +231,12 @@ After agent returns, go back to `handle_return`.
 - [ ] Active sessions checked via debug-list
 - [ ] Symptoms gathered (if new issue)
 - [ ] Debug session bead created with forge:debug label
-- [ ] forge-debugger spawned with bead ID and symptoms
+- [ ] Milestone detected via `bd memories forge:session:last-milestone` (or fallback to main)
+- [ ] Branch created and worktree set up via `worktree-create-task` with --prefix=debug and correct --base
+- [ ] forge-debugger spawned with bead ID, symptoms, and worktree/branch context
+- [ ] Debugger verifies it is on forge/debug-<debug-id> branch before committing
 - [ ] Checkpoints presented to user and responses relayed
-- [ ] Continuation agents spawned with prior state from bead
+- [ ] Continuation agents spawned with prior state from bead and git isolation context
 - [ ] Root cause confirmed before fixing
+- [ ] PR created on debug completion via `quick-pr-create` targeting milestone branch (or main)
 </success_criteria>

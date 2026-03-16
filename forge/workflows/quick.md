@@ -54,12 +54,30 @@ bd label add $QUICK_ID forge:quick
 bd update $QUICK_ID --status=in_progress
 ```
 
-Create branch:
+Detect active milestone (determines worktree base and PR target):
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-branch-create $QUICK_ID
+MILESTONE_ID=$(bd memories forge:session:last-milestone 2>/dev/null || echo "")
 ```
 
-If branch creation fails, warn but continue. Report: `Created quick task: ${QUICK_ID} -- ${DESCRIPTION}`
+- If `$MILESTONE_ID` is non-empty, check that the bead has the `forge:milestone` label to confirm it is valid.
+- Set `$BASE_BRANCH`:
+  - With milestone: `forge/milestone-${MILESTONE_ID}`
+  - Without milestone: `main`
+
+Create worktree for isolation:
+```bash
+# With milestone:
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task $QUICK_ID --prefix=quick --base=forge/milestone-${MILESTONE_ID}
+
+# Without milestone:
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task $QUICK_ID --prefix=quick --base=main
+```
+
+Parse the JSON result for `path` (the worktree directory) and `branch`. Store `$WORKTREE_PATH` and `$QUICK_BRANCH`.
+
+If worktree creation fails, warn but continue (fall back to current working directory). Report: `Created quick task: ${QUICK_ID} -- ${DESCRIPTION}`
+
+All subsequent file operations and executor work happen inside `$WORKTREE_PATH`.
 
 ---
 
@@ -179,15 +197,20 @@ Description: <task description>
 Acceptance Criteria: <acceptance_criteria>
 Quick Task Context: ${DESCRIPTION}
 
+Working directory: ${WORKTREE_PATH}
+Branch: ${QUICK_BRANCH}
+
 Instructions:
 1. Claim the task: bd update <task-id> --status=in_progress
-2. Implement the task following the description and acceptance criteria
-3. Run relevant tests to verify acceptance criteria are met
-4. Verify you are on the forge/quick-${QUICK_ID} branch before committing.
+2. Work inside the worktree directory: ${WORKTREE_PATH}
+   All file reads, edits, and commands must use this directory.
+3. Implement the task following the description and acceptance criteria
+4. Run relevant tests to verify acceptance criteria are met
+5. Verify you are on the ${QUICK_BRANCH} branch before committing.
    Format: feat(quick-${QUICK_ID}): <summary> [task <task-id>]
    Use git add <specific files> -- never git add . or git add -A
    NEVER run git merge or gh pr merge
-5. Close the task: bd close <task-id> --reason='<brief summary>'
+6. Close the task: bd close <task-id> --reason='<brief summary>'
 
 If blocked: bd update <task-id> --notes='BLOCKED: <description>' -- do NOT close.
 ")
@@ -240,7 +263,8 @@ SETTINGS=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" settings-load)
 - If `true`: scope changed files and run quality-gate workflow:
 
 ```bash
-CHANGED_FILES=$(git diff main...HEAD --name-only)
+# Diff against the base branch (milestone branch or main)
+CHANGED_FILES=$(git diff ${BASE_BRANCH}...HEAD --name-only)
 ```
 
 If files changed, follow `@~/.claude/forge/workflows/quality-gate.md`. If user approves fixes, commit before proceeding.
@@ -249,8 +273,12 @@ If files changed, follow `@~/.claude/forge/workflows/quality-gate.md`. If user a
 ```bash
 BRANCH=$(git branch --show-current)
 node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-push $BRANCH
-PR_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-pr-create $QUICK_ID)
+PR_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" quick-pr-create $QUICK_ID --base=${BASE_BRANCH})
 ```
+
+The `--base` flag tells `quick-pr-create` where to target the PR:
+- With milestone: PR targets `forge/milestone-${MILESTONE_ID}`
+- Without milestone: PR targets `main`
 
 Best-effort: if PR creation fails, warn and continue.
 
@@ -282,15 +310,16 @@ Ready for next task: /forge:quick
 - [ ] User provides task description (or prompted interactively)
 - [ ] `--full` and `--discuss` flags parsed when present
 - [ ] Quick task bead created with `forge:quick` label and parent-child dep
-- [ ] Branch forge/quick-<id> created after bead creation
+- [ ] Milestone detected via `bd memories forge:session:last-milestone` (or fallback to main)
+- [ ] Worktree created via `worktree-create-task` with correct --prefix=quick and --base
 - [ ] (--discuss) Gray areas identified, decisions captured in bead notes
 - [ ] 1-3 task beads created with forge:task label, parent-child to quick bead
 - [ ] (--full) Plan checker validates plan, revision loop capped at 2
 - [ ] All tasks executed with atomic commits using feat(quick-<id>): format
-- [ ] Executor verifies branch before committing, uses git add <specific files>
+- [ ] Executor works inside the worktree directory, verifies branch before committing, uses git add <specific files>
 - [ ] (--full) Verification run and status recorded
 - [ ] Quality gate runs when setting is true, skipped when false
-- [ ] Branch pushed and PR created (best-effort)
+- [ ] Branch pushed and PR created targeting milestone branch (or main if no milestone)
 - [ ] Quick task bead closed with completion reason
 </success_criteria>
 </output>
