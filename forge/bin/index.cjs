@@ -9,6 +9,7 @@ const { forgeError } = require('./core.cjs');
 const phaseCommands = require('./phase-commands.cjs');
 const contextCommands = require('./context-commands.cjs');
 const projectCommands = require('./project-commands.cjs');
+const settingsCommands = require('./settings-commands.cjs');
 const gitCommands = require('./git-commands.cjs');
 const roadmapCommands = require('./roadmap-commands.cjs');
 const qualityGateCommands = require('./quality-gate-commands.cjs');
@@ -20,6 +21,7 @@ const commands = Object.assign(
   phaseCommands,
   contextCommands,
   projectCommands,
+  settingsCommands,
   gitCommands,
   roadmapCommands,
   qualityGateCommands,
