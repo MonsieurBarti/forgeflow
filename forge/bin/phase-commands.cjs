@@ -17,6 +17,7 @@ const os = require('os');
 const {
   bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
   unwrapBdArray, collectMilestoneRequirements, findGitRoot, resolveSettings,
+  git, gh,
 } = require('./core.cjs');
 const { serveAndAwaitDecision } = require('./dev-server.cjs');
 const { esc, COMPONENT_CSS, wrapPage, card, badge, tabs } = require('./design-system.cjs');
@@ -609,6 +610,63 @@ module.exports = {
         severity: 'error',
         details: `${openBlockers.length} blocker phase(s) are not closed: ${list}`,
       });
+    }
+
+    // Check that closed blocker phases have their PRs/branches merged into the milestone branch
+    const milestoneParentId = phase?.parent || null;
+    if (milestoneParentId) {
+      const milestoneBranch = `forge/milestone-${milestoneParentId}`;
+      // Check if the milestone branch exists (local or remote)
+      const msBranchExists = git(['rev-parse', '--verify', milestoneBranch], { allowFail: true })
+        || git(['rev-parse', '--verify', `origin/${milestoneBranch}`], { allowFail: true });
+
+      if (!msBranchExists) {
+        issues.push({
+          type: 'blocker_pr_unmerged',
+          severity: 'warning',
+          details: `Milestone branch '${milestoneBranch}' does not exist yet; skipping blocker PR merge check.`,
+        });
+      } else {
+        // Fetch all branches merged into the milestone branch in a single git call
+        const mergedRaw = git(['branch', '-a', '--merged', milestoneBranch], { allowFail: true }) || '';
+        const mergedBranches = new Set(
+          mergedRaw.split('\n').map(b => b.trim().replace(/^\* /, '').replace(/^remotes\/origin\//, ''))
+        );
+
+        // Collect closed blockers whose branches are not merged
+        const unmergedBlockers = [];
+        for (const dep of blockerDeps) {
+          const blockerId = dep.from || dep.source || dep.id;
+          if (!blockerId || blockerId === phaseId) continue;
+          const blocker = unwrapBdArray(bdJsonArgs(['show', blockerId]));
+          if (!blocker || blocker.status !== 'closed') continue;
+
+          const blockerBranch = `forge/phase-${blockerId}`;
+          // Check if the blocker branch exists at all (local or remote)
+          const branchExists = git(['rev-parse', '--verify', blockerBranch], { allowFail: true })
+            || git(['rev-parse', '--verify', `origin/${blockerBranch}`], { allowFail: true });
+          if (!branchExists) continue; // blocker has no branch -- skip (AC7)
+
+          if (!mergedBranches.has(blockerBranch) && !mergedBranches.has(`origin/${blockerBranch}`)) {
+            unmergedBlockers.push({
+              id: blockerId,
+              title: blocker.title,
+              branch: blockerBranch,
+            });
+          }
+        }
+
+        if (unmergedBlockers.length > 0) {
+          const list = unmergedBlockers.map(
+            b => `${b.id} (branch: ${b.branch})`
+          ).join(', ');
+          issues.push({
+            type: 'blocker_pr_unmerged',
+            severity: 'error',
+            details: `${unmergedBlockers.length} blocker phase(s) closed but not merged into '${milestoneBranch}': ${list}`,
+          });
+        }
+      }
     }
 
     if (tasks.length === 0) {
