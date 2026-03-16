@@ -406,7 +406,7 @@ Check for:
 4. Whether files_affected suggest high-traffic paths that need performance attention
 
 N+1 subprocess filter: Skip any N+1 findings for bd CLI subprocess calls (bd, bdArgs,
-bdJson, bdJsonArgs helper functions). The bd CLI has no batch query API, so sequential
+bdJsonArgs helper functions). The bd CLI has no batch query API, so sequential
 invocations cannot be optimized and these findings are false positives.
 
 Output your findings as raw JSON conforming to agents/schemas/plan-audit.md (do NOT wrap in markdown fences).

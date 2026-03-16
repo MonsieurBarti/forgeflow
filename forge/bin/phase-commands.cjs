@@ -471,7 +471,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -576,7 +576,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -597,7 +597,7 @@ module.exports = {
     for (const dep of blockerDeps) {
       const blockerId = dep.from || dep.source || dep.id;
       if (!blockerId || blockerId === phaseId) continue;
-      const blocker = bdJsonArgs(['show', blockerId]);
+      const blocker = unwrapBdArray(bdJsonArgs(['show', blockerId]));
       if (blocker && blocker.status !== 'closed') {
         openBlockers.push({ id: blockerId, title: blocker.title, status: blocker.status });
       }
@@ -651,7 +651,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -863,7 +863,7 @@ module.exports = {
     validateId(projectId);
     validateId(milestoneId);
 
-    const milestone = bdJsonArgs(['show', milestoneId]);
+    const milestone = unwrapBdArray(bdJsonArgs(['show', milestoneId]));
     if (!milestone || !milestone.id) {
       forgeError('NOT_FOUND', `Milestone '${milestoneId}' not found`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
@@ -983,7 +983,7 @@ module.exports = {
       for (const dep of parentDeps) {
         const ancestorId = dep.id;
         if (!ancestorId) continue;
-        const ancestor = bdJsonArgs(['show', ancestorId]);
+        const ancestor = unwrapBdArray(bdJsonArgs(['show', ancestorId]));
         if (ancestor && (ancestor.labels || []).includes('forge:milestone')) {
           parentId = ancestorId;
           break;
