@@ -260,6 +260,59 @@ Append cleanup results to the step 8 report:
 
 If any failures, list them so the user can investigate.
 
+## 7g. Changelog and Release
+
+Generate a changelog and optionally create a GitHub release for this milestone.
+
+**Step 1: Generate changelog**
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" changelog-generate
+```
+
+Parse the JSON result. If `generated` is false (no commits), skip this step.
+
+**Step 2: Bump version**
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" version-bump
+```
+
+Parse the JSON result. Display the version bump to the user:
+```
+Version bump: <previousVersion> → <newVersion> (<level>, <auto-detected or explicit>)
+```
+
+**Step 3: Commit release artifacts**
+```bash
+git add CHANGELOG.md package.json
+git commit -m "chore: release v<newVersion>"
+```
+
+**Step 4: Ask user about creating a GitHub release**
+
+Display a preview of the release:
+```
+Release preview:
+  Tag: v<newVersion>
+  Version: <previousVersion> → <newVersion>
+  Changelog: <commitCount> commits across <sections count> sections
+```
+
+Use AskUserQuestion (multiSelect: false):
+- header: "Release"
+- question: "Create a GitHub release for v<newVersion>?"
+- options:
+  - "Create release" — tag, push, and create GitHub release
+  - "Skip release" — keep changelog and version bump but don't create a release
+
+**Step 5: Create release (if confirmed)**
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" release-create
+```
+
+Parse the JSON result. Display the release URL if created.
+
+If release-create fails, report the error but do not block milestone completion.
+
 ## 8. Report and Next Steps
 
 ```
@@ -296,5 +349,10 @@ Next steps:
 - [ ] Cleanup preview shown (branches, beads, memories)
 - [ ] User confirmed cleanup execution (or skipped)
 - [ ] Cleanup executed (branches deleted, beads closed, memories purged)
+- [ ] Changelog generated from Conventional Commits (CHANGELOG.md)
+- [ ] Version bumped in package.json (auto-detected from CC types)
+- [ ] Release artifacts committed (CHANGELOG.md + package.json)
+- [ ] User asked about GitHub release creation
+- [ ] GitHub release created if confirmed (tag + push + gh release)
 - [ ] Next steps presented to user
 </success_criteria>
