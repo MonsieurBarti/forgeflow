@@ -195,203 +195,11 @@ const DASHBOARD_BASE_CSS = `
   }`;
 
 /**
- * Full legacy CSS for the interactive dashboard (generateInteractiveDashboardHTML).
- * The interactive dashboard's client-side renderDashboard() uses the original CSS class
- * names (.stat-card, .chart-card, .ring-container, .ms-tab, .badge, .phase-card,
- * .agent-card, etc.) and will be migrated to design-system components in a future task.
+ * Page-specific CSS for the interactive dashboard (generateInteractiveDashboardHTML).
+ * Base card/badge/ring/tab styles come from design-system COMPONENT_CSS.
+ * Only layout, gradients, content styling, interactive controls, and responsive rules remain here.
+ * Shares the same page-specific overrides as DASHBOARD_BASE_CSS (both dashboards use ds-* classes).
  */
-const DASHBOARD_INTERACTIVE_CSS = `
-  /* --- Header --- */
-  .dash-header {
-    padding: 2.5rem 3rem 2rem;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(99,102,241,0.04) 0%, transparent 100%);
-  }
-  .dash-header h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; }
-  .dash-header .subtitle { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.25rem; }
-  .dash-body { padding: 2rem 3rem 4rem; max-width: 1280px; margin: 0 auto; }
-
-  .overview-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2.5rem; }
-  .stat-card {
-    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem;
-    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    position: relative; overflow: hidden;
-  }
-  .stat-card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0;
-    height: 2px; background: var(--card-accent, var(--accent));
-    opacity: 0; transition: opacity 0.2s ease;
-  }
-  .stat-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-  .stat-card:hover::before { opacity: 1; }
-  .stat-card .stat-value { font-size: 2.25rem; font-weight: 700; line-height: 1; letter-spacing: -0.025em; }
-  .stat-card .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
-  .stat-card.accent { --card-accent: var(--accent); }
-  .stat-card.accent .stat-value { color: var(--accent); }
-  .stat-card.green { --card-accent: var(--green); }
-  .stat-card.green .stat-value { color: var(--green); }
-  .stat-card.orange { --card-accent: var(--orange); }
-  .stat-card.orange .stat-value { color: var(--orange); }
-  .stat-card.blue { --card-accent: var(--blue); }
-  .stat-card.blue .stat-value { color: var(--blue); }
-
-  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2.5rem; }
-  .chart-card {
-    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem;
-    display: flex; align-items: center; gap: 1.5rem; transition: border-color 0.2s ease;
-  }
-  .chart-card:hover { border-color: rgba(255,255,255,0.1); }
-  .chart-card h3 { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.25rem; }
-  .chart-card .chart-value { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; }
-  .chart-card .chart-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
-  .ring-container { flex-shrink: 0; position: relative; width: 80px; height: 80px; }
-  .ring-container svg { width: 80px; height: 80px; transform: rotate(-90deg); }
-  .ring-container .ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 6; }
-  .ring-container .ring-fg { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
-  .ring-pct { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
-  @keyframes ring-fill { from { stroke-dashoffset: var(--ring-circumference); } }
-  .ring-container .ring-fg { animation: ring-fill 1.2s ease forwards; }
-
-  .ms-tabs-container { margin-bottom: 2.5rem; }
-  .ms-tabs-nav {
-    display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border);
-    margin-bottom: 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
-  }
-  .ms-tabs-nav::-webkit-scrollbar { display: none; }
-  .ms-tab {
-    background: none; border: none; color: var(--text-muted);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 0.85rem; font-weight: 500; padding: 0.75rem 1.25rem;
-    cursor: pointer; border-bottom: 2px solid transparent;
-    transition: color 0.2s ease, border-color 0.2s ease; white-space: nowrap; position: relative;
-  }
-  .ms-tab:hover { color: var(--text-secondary); }
-  .ms-tab.active { color: var(--text); border-bottom-color: var(--tab-c1); }
-  .tab-check { color: var(--green); margin-right: 0.35rem; font-weight: 700; }
-
-  .ms-panel { display: none; }
-  .ms-panel.active { display: block; }
-  .ms-header {
-    background: var(--surface); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem;
-    display: flex; justify-content: space-between; align-items: center;
-    margin-top: 1.5rem; margin-bottom: 1.25rem; position: relative; overflow: hidden;
-  }
-  .ms-header::after {
-    content: ''; position: absolute; top: 0; left: 0; right: 0;
-    height: 2px; background: linear-gradient(90deg, var(--ms-c1), var(--ms-c2));
-  }
-  .ms-header h2 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.015em; border: none; padding: 0; margin: 0; }
-  .ms-goal { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.35rem; max-width: 600px; }
-  .ms-ring-wrap { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
-  .progress-ring { width: 80px; height: 80px; transform: rotate(-90deg); }
-  .progress-ring-bg { fill: none; stroke: var(--surface-2); stroke-width: 5; }
-  .progress-ring-fg { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset 1s ease; animation: ring-fill 1.2s ease forwards; }
-  .ring-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
-
-  .ms-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.5rem; }
-  .ms-mini-stat {
-    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; text-align: center;
-  }
-  .ms-mini-val { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em; }
-  .ms-mini-lbl { display: block; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.1rem; }
-
-  .section-title {
-    font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
-    text-transform: uppercase; letter-spacing: 0.06em;
-    margin-bottom: 1rem; margin-top: 1.5rem; padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .empty-msg { color: var(--text-muted); font-size: 0.85rem; font-style: italic; }
-
-  .phase-card {
-    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem;
-    margin-bottom: 0.75rem; transition: border-color 0.2s ease, transform 0.15s ease;
-  }
-  .phase-card:hover { border-color: rgba(255,255,255,0.1); transform: translateX(2px); }
-  .phase-card.phase-active { border-left: 3px solid var(--orange); }
-  .phase-card.phase-done { border-left: 3px solid var(--green); }
-  .phase-card.phase-pending { border-left: 3px solid var(--border); }
-  .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-  .phase-header h3 { font-size: 0.95rem; font-weight: 500; }
-  .phase-desc { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem; }
-  .phase-completed { font-size: 0.7rem; color: var(--green); margin-bottom: 0.5rem; font-weight: 500; }
-  .badge { font-size: 0.65rem; padding: 0.15rem 0.55rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-  .badge-phase-done { background: rgba(34,197,94,0.12); color: var(--green); }
-  .badge-phase-active { background: rgba(245,158,11,0.12); color: var(--orange); }
-  .badge-phase-pending { background: rgba(113,113,122,0.12); color: var(--text-muted); }
-  .progress-bar-container { width: 100%; height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 0.35rem; }
-  .progress-bar { height: 100%; border-radius: 2px; transition: width 0.6s ease; }
-  .phase-stats { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; }
-
-  .task-list { list-style: none; padding: 0; }
-  .task-list li { padding: 0.25rem 0; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
-  .task-icon { width: 1.2em; text-align: center; flex-shrink: 0; }
-  .task-done { color: var(--green); }
-  .task-active { color: var(--orange); }
-  .task-pending { color: var(--text-muted); }
-  .no-tasks { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
-  .task-list details summary { cursor: pointer; display: flex; align-items: center; gap: 0.5rem; list-style: none; transition: color 0.15s ease; }
-  .task-list details summary::-webkit-details-marker { display: none; }
-  .task-list details summary:hover { color: var(--text); }
-  .task-list details[open] summary { margin-bottom: 0.35rem; }
-  .task-details { margin-left: 1.7rem; padding: 0.5rem 0.75rem; background: var(--surface-2); border-radius: 6px; font-size: 0.75rem; color: var(--text-muted); }
-  .task-details pre { white-space: pre-wrap; font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.72rem; margin-top: 0.25rem; }
-  .task-desc, .task-ac { margin-bottom: 0.35rem; }
-  .no-detail summary { cursor: default; }
-
-  .req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; }
-  .req-cell { padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.75rem; font-weight: 500; transition: transform 0.15s ease; }
-  .req-cell:hover { transform: translateY(-1px); }
-  .req-covered { background: rgba(34,197,94,0.08); color: var(--green); border: 1px solid rgba(34,197,94,0.15); }
-  .req-uncovered { background: rgba(239,68,68,0.08); color: var(--red); border: 1px solid rgba(239,68,68,0.15); }
-
-  .quick-tasks-section { margin-top: 2.5rem; }
-  .quick-tasks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.75rem; }
-  .quick-pr-link { display: inline-block; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent); text-decoration: none; font-weight: 500; transition: color 0.15s ease; }
-  .quick-pr-link:hover { color: var(--blue); text-decoration: underline; }
-
-  .agent-section { margin-top: 3rem; }
-  .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
-  .agent-card {
-    background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem;
-    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-    position: relative; overflow: hidden;
-  }
-  .agent-card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0;
-    height: 2px; background: var(--agent-color); opacity: 0.6;
-  }
-  .agent-card:hover { border-color: rgba(255,255,255,0.1); transform: translateY(-2px); box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
-  .agent-vibe { font-size: 0.7rem; color: var(--text-muted); font-style: italic; margin-bottom: 0.5rem; }
-  .agent-name { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; letter-spacing: -0.01em; }
-  .agent-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 0.75rem; }
-  .agent-badge { display: inline-block; font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-
-  @media (max-width: 1024px) {
-    .dash-body { padding: 1.5rem; }
-    .dash-header { padding: 1.5rem; }
-    .overview-grid { grid-template-columns: repeat(2, 1fr); }
-    .charts-row { grid-template-columns: 1fr; }
-    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
-  }
-  @media (max-width: 640px) {
-    .dash-header { padding: 1.25rem; }
-    .dash-header h1 { font-size: 1.25rem; }
-    .dash-body { padding: 1rem; }
-    .overview-grid { grid-template-columns: 1fr; }
-    .charts-row { grid-template-columns: 1fr; }
-    .ms-stats-row { grid-template-columns: repeat(2, 1fr); }
-    .ms-header { flex-direction: column; gap: 1rem; text-align: center; }
-    .agent-grid { grid-template-columns: 1fr; }
-    .req-grid { grid-template-columns: 1fr; }
-    .quick-tasks-grid { grid-template-columns: 1fr; }
-  }`;
 
 /**
  * Parse a bd create result to extract the bead ID.
@@ -1323,8 +1131,9 @@ function generateInteractiveDashboardHTML(data) {
   // Use module-level MILESTONE_GRADIENTS constant (shared with static dashboard)
   const gradients = MILESTONE_GRADIENTS;
 
-  // Use DASHBOARD_INTERACTIVE_CSS (full legacy CSS) plus interactive-specific overrides
-  const dashExtraCSS = DASHBOARD_INTERACTIVE_CSS + `
+  // Use COMPONENT_CSS (design-system base) + DASHBOARD_BASE_CSS (shared page-specific)
+  // plus interactive-specific overrides (buttons, refresh status)
+  const dashExtraCSS = COMPONENT_CSS + DASHBOARD_BASE_CSS + `
   /* --- Interactive-only: flex header layout for action buttons --- */
   .dash-header {
     display: flex;
@@ -1437,41 +1246,41 @@ function generateInteractiveDashboardHTML(data) {
 
     // Overview stat cards
     parts.push('<div class="overview-grid">');
-    parts.push('<div class="stat-card accent" style="--card-accent:var(--accent)"><div class="stat-value">' + data.totalPhases + '</div><div class="stat-label">Total Phases</div></div>');
-    parts.push('<div class="stat-card green"><div class="stat-value">' + data.completedPhases + '</div><div class="stat-label">Completed</div></div>');
-    parts.push('<div class="stat-card orange"><div class="stat-value">' + phasesInProgress + '</div><div class="stat-label">In Progress</div></div>');
-    parts.push('<div class="stat-card blue"><div class="stat-value">' + reqsTotal + '</div><div class="stat-label">Requirements</div></div>');
+    parts.push('<div class="ds-card stat-card accent" style="--card-accent:var(--accent)"><div class="ds-card-content"><div class="stat-value">' + data.totalPhases + '</div><div class="stat-label">Total Phases</div></div></div>');
+    parts.push('<div class="ds-card stat-card green"><div class="ds-card-content"><div class="stat-value">' + data.completedPhases + '</div><div class="stat-label">Completed</div></div></div>');
+    parts.push('<div class="ds-card stat-card orange"><div class="ds-card-content"><div class="stat-value">' + phasesInProgress + '</div><div class="stat-label">In Progress</div></div></div>');
+    parts.push('<div class="ds-card stat-card blue"><div class="ds-card-content"><div class="stat-value">' + reqsTotal + '</div><div class="stat-label">Requirements</div></div></div>');
     parts.push('</div>');
 
     // SVG Progress Rings
     parts.push('<div class="charts-row">');
-    parts.push('<div class="chart-card"><div class="ring-container" style="--ring-circumference:' + circumference + '">');
-    parts.push('<svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54" />');
-    parts.push('<circle class="ring-fg" cx="60" cy="60" r="54" stroke="#22c55e" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + Math.round(circumference * (1 - phaseRingPct / 100)) + '" style="--ring-circumference:' + circumference + '" /></svg>');
-    parts.push('<span class="ring-pct">' + phaseRingPct + '%</span></div>');
+    parts.push('<div class="ds-card chart-card"><div class="ds-card-content"><div class="ds-ring-container" style="width:80px;height:80px;position:relative">');
+    parts.push('<svg viewBox="0 0 120 120" style="width:80px;height:80px;transform:rotate(-90deg)"><circle cx="60" cy="60" r="54" fill="none" stroke="var(--surface-2)" stroke-width="6" />');
+    parts.push('<circle cx="60" cy="60" r="54" fill="none" stroke="#22c55e" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + Math.round(circumference * (1 - phaseRingPct / 100)) + '" /></svg>');
+    parts.push('<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.85rem;font-weight:600;color:var(--text-secondary)">' + phaseRingPct + '%</span></div>');
     parts.push('<div><h3>Phase Completion</h3><div class="chart-value">' + data.completedPhases + ' / ' + data.totalPhases + '</div>');
-    parts.push('<div class="chart-sub">' + phasesInProgress + ' in progress, ' + phasesOpen + ' open</div></div></div>');
+    parts.push('<div class="chart-sub">' + phasesInProgress + ' in progress, ' + phasesOpen + ' open</div></div></div></div>');
 
-    parts.push('<div class="chart-card"><div class="ring-container" style="--ring-circumference:' + circumference + '">');
+    parts.push('<div class="ds-card chart-card"><div class="ds-card-content"><div class="ds-ring-container" style="width:80px;height:80px;position:relative">');
     var reqColor = reqRingPct >= 80 ? '#22c55e' : reqRingPct >= 50 ? '#f59e0b' : '#ef4444';
-    parts.push('<svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54" />');
-    parts.push('<circle class="ring-fg" cx="60" cy="60" r="54" stroke="' + reqColor + '" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + Math.round(circumference * (1 - reqRingPct / 100)) + '" style="--ring-circumference:' + circumference + '" /></svg>');
-    parts.push('<span class="ring-pct">' + reqRingPct + '%</span></div>');
+    parts.push('<svg viewBox="0 0 120 120" style="width:80px;height:80px;transform:rotate(-90deg)"><circle cx="60" cy="60" r="54" fill="none" stroke="var(--surface-2)" stroke-width="6" />');
+    parts.push('<circle cx="60" cy="60" r="54" fill="none" stroke="' + reqColor + '" stroke-width="6" stroke-linecap="round" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + Math.round(circumference * (1 - reqRingPct / 100)) + '" /></svg>');
+    parts.push('<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.85rem;font-weight:600;color:var(--text-secondary)">' + reqRingPct + '%</span></div>');
     parts.push('<div><h3>Requirement Coverage</h3><div class="chart-value">' + reqsCovered + ' / ' + reqsTotal + '</div>');
-    parts.push('<div class="chart-sub">' + (reqsTotal - reqsCovered) + ' uncovered</div></div></div>');
+    parts.push('<div class="chart-sub">' + (reqsTotal - reqsCovered) + ' uncovered</div></div></div></div>');
     parts.push('</div>');
 
     // Milestone tabs
     if (milestones.length > 0) {
-      parts.push('<div class="ms-tabs-container">');
-      parts.push('<div class="ms-tabs-nav">');
+      parts.push('<div class="ds-tabs-container">');
+      parts.push('<div class="ds-tabs-nav">');
       for (var mi = 0; mi < milestones.length; mi++) {
         var ms = milestones[mi];
         var grad = GRADIENTS[mi % GRADIENTS.length];
         var isActive = mi === activeMsIdx;
         var isDone = ms.status === 'closed';
         var checkmark = isDone ? '<span class="tab-check">&#x2713;</span>' : '';
-        parts.push('<button class="ms-tab' + (isActive ? ' active' : '') + '" data-tab="' + mi + '" style="--tab-c1:' + grad[0] + ';--tab-c2:' + grad[1] + '">' + checkmark + esc(ms.title) + '</button>');
+        parts.push('<button class="ds-tab' + (isActive ? ' ds-tab-active' : '') + '" data-ds-tab="' + mi + '" style="--tab-c1:' + grad[0] + ';--tab-c2:' + grad[1] + '">' + checkmark + esc(ms.title) + '</button>');
       }
       parts.push('</div>');
 
@@ -1484,20 +1293,20 @@ function generateInteractiveDashboardHTML(data) {
         var msCoveredReqs = msReqs.filter(function(r) { return r.covered; }).length;
         var msCirc = Math.round(2 * Math.PI * 34);
 
-        parts.push('<div class="ms-panel' + (isActiveP ? ' active' : '') + '" data-panel="' + pi + '">');
-        parts.push('<div class="ms-header" style="--ms-c1:' + gradP[0] + ';--ms-c2:' + gradP[1] + '"><div class="ms-header-content"><h2>' + esc(msP.title) + '</h2>');
+        parts.push('<div class="ds-tab-panel' + (isActiveP ? ' ds-tab-panel-active' : '') + '" data-ds-panel="' + pi + '">');
+        parts.push('<div class="ds-card ms-header" style="--ms-c1:' + gradP[0] + ';--ms-c2:' + gradP[1] + '"><div class="ds-card-content"><div class="ms-header-content"><h2>' + esc(msP.title) + '</h2>');
         if (msP.goal) parts.push('<p class="ms-goal">' + esc(msP.goal) + '</p>');
         parts.push('</div>');
-        parts.push('<div class="ms-ring-wrap"><svg class="progress-ring" viewBox="0 0 80 80">');
-        parts.push('<circle class="progress-ring-bg" cx="40" cy="40" r="34" />');
-        parts.push('<circle class="progress-ring-fg" cx="40" cy="40" r="34" stroke-dasharray="' + msCirc + '" stroke-dashoffset="' + Math.round(msCirc * (1 - msP.progress / 100)) + '" style="stroke:' + gradP[0] + '" /></svg>');
-        parts.push('<span class="ring-label">' + msP.progress + '%</span></div></div>');
+        parts.push('<div class="ds-ring-container" style="width:80px;height:80px;position:relative;flex-shrink:0"><svg viewBox="0 0 80 80" style="width:80px;height:80px;transform:rotate(-90deg)">');
+        parts.push('<circle cx="40" cy="40" r="34" fill="none" stroke="var(--surface-2)" stroke-width="5" />');
+        parts.push('<circle cx="40" cy="40" r="34" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="' + msCirc + '" stroke-dashoffset="' + Math.round(msCirc * (1 - msP.progress / 100)) + '" style="stroke:' + gradP[0] + '" /></svg>');
+        parts.push('<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:0.85rem;font-weight:600;color:var(--text-secondary)">' + msP.progress + '%</span></div></div></div></div>');
 
         parts.push('<div class="ms-stats-row">');
-        parts.push('<div class="ms-mini-stat"><span class="ms-mini-val">' + msP.phase_count + '</span><span class="ms-mini-lbl">Phases</span></div>');
-        parts.push('<div class="ms-mini-stat"><span class="ms-mini-val">' + msP.completed_count + '</span><span class="ms-mini-lbl">Done</span></div>');
-        parts.push('<div class="ms-mini-stat"><span class="ms-mini-val">' + msReqs.length + '</span><span class="ms-mini-lbl">Reqs</span></div>');
-        parts.push('<div class="ms-mini-stat"><span class="ms-mini-val">' + msCoveredReqs + '</span><span class="ms-mini-lbl">Covered</span></div>');
+        parts.push('<div class="ds-card ms-mini-stat"><span class="ms-mini-val">' + msP.phase_count + '</span><span class="ms-mini-lbl">Phases</span></div>');
+        parts.push('<div class="ds-card ms-mini-stat"><span class="ms-mini-val">' + msP.completed_count + '</span><span class="ms-mini-lbl">Done</span></div>');
+        parts.push('<div class="ds-card ms-mini-stat"><span class="ms-mini-val">' + msReqs.length + '</span><span class="ms-mini-lbl">Reqs</span></div>');
+        parts.push('<div class="ds-card ms-mini-stat"><span class="ms-mini-val">' + msCoveredReqs + '</span><span class="ms-mini-lbl">Covered</span></div>');
         parts.push('</div>');
 
         parts.push('<div class="ms-body"><h3 class="section-title">Phases</h3>');
@@ -1508,9 +1317,11 @@ function generateInteractiveDashboardHTML(data) {
             var phase = msPhases[phi];
             var pct = phase.tasks_total > 0 ? Math.round((phase.tasks_closed / phase.tasks_total) * 100) : 0;
             var statusClass = phase.status === 'closed' ? 'phase-done' : phase.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+            var badgeVariant = phase.status === 'closed' ? 'done' : phase.status === 'in_progress' ? 'active' : 'pending';
             var statusBadge = phase.status === 'closed' ? 'Done' : phase.status === 'in_progress' ? 'Active' : 'Pending';
-            parts.push('<div class="phase-card ' + statusClass + '">');
-            parts.push('<div class="phase-header"><h3>' + esc(phase.title) + '</h3><span class="badge badge-' + statusClass + '">' + statusBadge + '</span></div>');
+            var badgeColors = {done:'background:rgba(34,197,94,0.12);color:var(--green)',active:'background:rgba(245,158,11,0.12);color:var(--orange)',pending:'background:rgba(113,113,122,0.12);color:var(--text-muted)'};
+            parts.push('<div class="ds-card phase-card ' + statusClass + '">');
+            parts.push('<div class="phase-header"><h3>' + esc(phase.title) + '</h3><span class="ds-badge" style="' + badgeColors[badgeVariant] + '">' + statusBadge + '</span></div>');
             if (phase.description) parts.push('<p class="phase-desc">' + esc(phase.description) + '</p>');
             if (phase.status === 'closed' && phase.completed_at) {
               var compDate = new Date(phase.completed_at);
@@ -1568,7 +1379,9 @@ function generateInteractiveDashboardHTML(data) {
         var fpPct = fp.tasks_total > 0 ? Math.round((fp.tasks_closed / fp.tasks_total) * 100) : 0;
         var fpStatusClass = fp.status === 'closed' ? 'phase-done' : fp.status === 'in_progress' ? 'phase-active' : 'phase-pending';
         var fpStatusBadge = fp.status === 'closed' ? 'Done' : fp.status === 'in_progress' ? 'Active' : 'Pending';
-        parts.push('<div class="phase-card ' + fpStatusClass + '"><div class="phase-header"><h3>' + esc(fp.title) + '</h3><span class="badge badge-' + fpStatusClass + '">' + fpStatusBadge + '</span></div>');
+        var fpBadgeVariant = fp.status === 'closed' ? 'done' : fp.status === 'in_progress' ? 'active' : 'pending';
+        var fpBadgeColors = {done:'background:rgba(34,197,94,0.12);color:var(--green)',active:'background:rgba(245,158,11,0.12);color:var(--orange)',pending:'background:rgba(113,113,122,0.12);color:var(--text-muted)'};
+        parts.push('<div class="ds-card phase-card ' + fpStatusClass + '"><div class="phase-header"><h3>' + esc(fp.title) + '</h3><span class="ds-badge" style="' + fpBadgeColors[fpBadgeVariant] + '">' + fpStatusBadge + '</span></div>');
         parts.push('<div class="progress-bar-container"><div class="progress-bar" style="width:' + fpPct + '%;background:var(--accent)"></div></div>');
         parts.push('<div class="phase-stats">' + fp.tasks_closed + '/' + fp.tasks_total + ' tasks</div></div>');
       }
@@ -1580,8 +1393,10 @@ function generateInteractiveDashboardHTML(data) {
       for (var qi = 0; qi < quickTasks.length; qi++) {
         var qt = quickTasks[qi];
         var qtStatusClass = qt.status === 'closed' ? 'phase-done' : qt.status === 'in_progress' ? 'phase-active' : 'phase-pending';
+        var qtBadgeVariant = qt.status === 'closed' ? 'done' : qt.status === 'in_progress' ? 'active' : 'pending';
         var qtStatusBadge = qt.status === 'closed' ? 'Done' : qt.status === 'in_progress' ? 'Active' : 'Open';
-        parts.push('<div class="phase-card ' + qtStatusClass + '"><div class="phase-header"><h3>' + esc(qt.title) + '</h3><span class="badge badge-' + qtStatusClass + '">' + qtStatusBadge + '</span></div>');
+        var qtBadgeColors = {done:'background:rgba(34,197,94,0.12);color:var(--green)',active:'background:rgba(245,158,11,0.12);color:var(--orange)',pending:'background:rgba(113,113,122,0.12);color:var(--text-muted)'};
+        parts.push('<div class="ds-card phase-card ' + qtStatusClass + '"><div class="phase-header"><h3>' + esc(qt.title) + '</h3><span class="ds-badge" style="' + qtBadgeColors[qtBadgeVariant] + '">' + qtStatusBadge + '</span></div>');
         if (qt.description) parts.push('<p class="phase-desc">' + esc(qt.description) + '</p>');
         if (qt.children && qt.children.length > 0) {
           parts.push('<ul class="task-list">');
@@ -1605,12 +1420,12 @@ function generateInteractiveDashboardHTML(data) {
         var colorVal = a.color || SAFE_FALLBACK_COLOR;
         var mapped = COLOR_MAP[colorVal.toLowerCase()];
         var resolvedColor = mapped || (HEX_COLOR_RE.test(colorVal) ? colorVal : SAFE_FALLBACK_COLOR);
-        parts.push('<div class="agent-card" style="--agent-color:' + resolvedColor + '">');
-        parts.push('<div class="agent-vibe">' + esc(a.vibe) + '</div>');
+        parts.push('<div class="ds-card agent-card" style="--agent-color:' + resolvedColor + '">');
+        parts.push('<div class="ds-card-content"><div class="agent-vibe">' + esc(a.vibe) + '</div>');
         parts.push('<div class="agent-name">' + esc(a.name) + '</div>');
         parts.push('<div class="agent-desc">' + esc(a.description) + '</div>');
-        parts.push('<span class="agent-badge" style="background:' + resolvedColor + '20;color:' + resolvedColor + ';border:1px solid ' + resolvedColor + '40">' + esc(a.color || 'default') + '</span>');
-        parts.push('</div>');
+        parts.push('<span class="ds-badge" style="background:' + resolvedColor + '20;color:' + resolvedColor + ';border:1px solid ' + resolvedColor + '40">' + esc(a.color || 'default') + '</span>');
+        parts.push('</div></div>');
       }
       parts.push('</div></div>');
     }
@@ -1619,14 +1434,14 @@ function generateInteractiveDashboardHTML(data) {
     container.innerHTML = parts.join('');
 
     // Re-attach milestone tab event listeners
-    container.querySelectorAll('.ms-tab').forEach(function(tab) {
+    container.querySelectorAll('.ds-tab').forEach(function(tab) {
       tab.addEventListener('click', function() {
-        var idx = this.getAttribute('data-tab');
-        container.querySelectorAll('.ms-tab').forEach(function(t) { t.classList.remove('active'); });
-        container.querySelectorAll('.ms-panel').forEach(function(p) { p.classList.remove('active'); });
-        this.classList.add('active');
-        var panel = container.querySelector('.ms-panel[data-panel="' + idx + '"]');
-        if (panel) panel.classList.add('active');
+        var idx = this.getAttribute('data-ds-tab');
+        container.querySelectorAll('.ds-tab').forEach(function(t) { t.classList.remove('ds-tab-active'); });
+        container.querySelectorAll('.ds-tab-panel').forEach(function(p) { p.classList.remove('ds-tab-panel-active'); });
+        this.classList.add('ds-tab-active');
+        var panel = container.querySelector('.ds-tab-panel[data-ds-panel="' + idx + '"]');
+        if (panel) panel.classList.add('ds-tab-panel-active');
       });
     });
   }
