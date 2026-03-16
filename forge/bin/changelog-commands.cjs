@@ -290,6 +290,89 @@ module.exports = {
     });
   },
 
+  /**
+   * Create a GitHub release with the latest CHANGELOG.md section as the body.
+   * Creates a git tag, pushes it, and calls gh release create.
+   *
+   * Idempotency: aborts if tag or release already exists.
+   */
+  'release-create'(args) {
+    const gitRoot = findGitRoot(process.cwd()) || process.cwd();
+
+    // Read version from package.json
+    const pkgPath = path.join(gitRoot, 'package.json');
+    let version;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      version = pkg.version;
+    } catch {
+      forgeError('MISSING_FILE', 'package.json not found or invalid', `Expected at: ${pkgPath}`);
+    }
+
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+      forgeError('INVALID_INPUT', `Version "${version}" is not valid semver`, 'Run forge-tools version-bump first');
+    }
+
+    const tag = `v${version}`;
+
+    // Idempotency: check if tag already exists
+    const existingTag = git(['tag', '--list', tag], { allowFail: true });
+    if (existingTag) {
+      forgeError('ALREADY_EXISTS', `Tag ${tag} already exists`, `A release for ${tag} may already exist. Check with: gh release view ${tag}`);
+    }
+
+    // Idempotency: check if release already exists
+    const existingRelease = gh(['release', 'view', tag, '--json', 'url', '--jq', '.url'], { allowFail: true });
+    if (existingRelease) {
+      output({ created: false, tag, version, releaseUrl: existingRelease.trim(), reason: 'already_exists' });
+      return;
+    }
+
+    // Extract the topmost version section from CHANGELOG.md
+    const changelogPath = path.join(gitRoot, 'CHANGELOG.md');
+    if (!fs.existsSync(changelogPath)) {
+      forgeError('MISSING_FILE', 'CHANGELOG.md not found', 'Run forge-tools changelog-generate first');
+    }
+
+    const changelog = fs.readFileSync(changelogPath, 'utf8');
+    const sectionRegex = /^## \[/m;
+    const firstMatch = changelog.match(sectionRegex);
+    if (!firstMatch) {
+      forgeError('INVALID_INPUT', 'No version sections found in CHANGELOG.md', 'Run forge-tools changelog-generate first');
+    }
+
+    // Extract from first ## [ to the next ## [ (or EOF)
+    const startIdx = firstMatch.index;
+    const rest = changelog.slice(startIdx + 1);
+    const nextMatch = rest.match(sectionRegex);
+    const releaseBody = nextMatch
+      ? changelog.slice(startIdx, startIdx + 1 + nextMatch.index).trim()
+      : changelog.slice(startIdx).trim();
+
+    // Write release body to a temp file (avoids shell arg length limits)
+    const tmpDir = require('os').tmpdir();
+    const notesFile = path.join(tmpDir, `forge-release-${tag}.md`);
+    fs.writeFileSync(notesFile, releaseBody);
+
+    try {
+      // Create and push tag (never force)
+      git(['tag', tag]);
+      git(['push', 'origin', tag]);
+
+      // Create release via gh CLI
+      const releaseUrl = gh([
+        'release', 'create', tag,
+        '--title', tag,
+        '--notes-file', notesFile,
+      ]);
+
+      output({ created: true, tag, version, releaseUrl: releaseUrl.trim() });
+    } finally {
+      // Clean up temp file
+      try { fs.unlinkSync(notesFile); } catch { /* best-effort */ }
+    }
+  },
+
   // Expose helpers for internal reuse
   _parseConventionalCommits: parseConventionalCommits,
   _formatChangelogSection: formatChangelogSection,
