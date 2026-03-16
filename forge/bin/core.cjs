@@ -308,6 +308,14 @@ function normalizeChildren(raw) {
 }
 
 /**
+ * Unwrap a single-item bd show result.
+ * bd may return [item] or item depending on context; this normalizes to the item itself.
+ */
+function unwrapBdArray(raw) {
+  return Array.isArray(raw) ? raw[0] ?? null : raw ?? null;
+}
+
+/**
  * Collect all forge:req beads from a milestone using 3-level traversal:
  *   milestone -> phases (forge:phase children) -> each phase's children filtered for forge:req
  *
@@ -648,6 +656,7 @@ module.exports = {
   gh,
   output,
   normalizeChildren,
+  unwrapBdArray,
   collectMilestoneRequirements,
   forgeError,
   validateId,

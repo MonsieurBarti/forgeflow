@@ -10,7 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { bd, bdArgs, bdJsonArgs, git, gh, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
+const { bd, bdArgs, bdJsonArgs, git, gh, output, forgeError, validateId, normalizeChildren, unwrapBdArray } = require('./core.cjs');
 
 /**
  * Resolve a worktree path and verify it stays within the expected base directory.
@@ -110,8 +110,7 @@ module.exports = {
 
     let milestoneId = null;
     for (const dep of parentDeps) {
-      const raw = bdJsonArgs(['show', dep.id]);
-      const item = Array.isArray(raw) ? raw[0] : raw;
+      const item = unwrapBdArray(bdJsonArgs(['show', dep.id]));
       if ((item?.labels || []).includes('forge:milestone')) {
         milestoneId = dep.id;
         break;
@@ -159,8 +158,7 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools pr-create <phase-id> [--base=<branch>]');
     }
 
-    const phaseRaw = bdJsonArgs(['show', phaseId]);
-    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -203,8 +201,7 @@ module.exports = {
 
     let milestoneId = null;
     if (parentDep) {
-      const parentRaw = bdJsonArgs(['show', parentDep.id]);
-      const parent = Array.isArray(parentRaw) ? parentRaw[0] : parentRaw;
+      const parent = unwrapBdArray(bdJsonArgs(['show', parentDep.id]));
       const parentLabels = parent?.labels || [];
       if (parentLabels.includes('forge:milestone')) {
         milestoneId = parentDep.id;
@@ -273,8 +270,7 @@ module.exports = {
     }
     validateId(quickId);
 
-    const quickRaw = bdJsonArgs(['show', quickId]);
-    const quick = Array.isArray(quickRaw) ? quickRaw[0] : quickRaw;
+    const quick = unwrapBdArray(bdJsonArgs(['show', quickId]));
     const children = bdJsonArgs(['children', quickId]);
     const tasks = normalizeChildren(children);
 
