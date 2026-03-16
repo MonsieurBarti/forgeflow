@@ -1,0 +1,235 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [0.3.0] - 2026-03-16
+
+### Added
+
+- instrument output() with schema validation and annotate 129 call sites [task forgeflow-gx5r]
+- add agent response schemas and generated docs [task forgeflow-i2lp]
+- add schemas.cjs with 72 command output schema definitions [task forgeflow-73jf]
+- default web_ui setting to false [task forgeflow-h1q8]
+- add release-create command, update release.yml, integrate into complete-milestone [task forgeflow-mean]
+- add version-bump command with CC auto-detection [task forgeflow-db2r]
+- add CC parser and changelog-generate command [task forgeflow-4tnn]
+- add plan-interactive-review command and wire into plan-phase workflow [task forgeflow-qbhq]
+- add interactive plan review HTML generator [task forgeflow-b9lf]
+- extract collectPlanData() helper from implementation-preview [task forgeflow-umxk]
+- add shift-left settings to core and settings workflow [task forgeflow-wvyt]
+- replace plan-time gate with 3-agent shift-left gate [task forgeflow-50nd]
+- add per-wave execution gate [task forgeflow-a8qy]
+- add interactive dashboard via dev-server [task forgeflow-0pdm]
+- add interactive quality-gate-triage command [task forgeflow-67x9]
+- add custom routes support to dev-server [task forgeflow-ux2k]
+- create dev-server.cjs promise-gated HTTP server [task forgeflow-6nky]
+- add web_ui toggle to forge settings [task forgeflow-o7nf]
+- create design-system.cjs component library [task forgeflow-2ej3]
+- insert implementation preview and hard approval gate [task forgeflow-wrto]
+- add implementation-preview command [task forgeflow-jvz7]
+- extend planner prompt for design data [task forgeflow-a07z]
+- make ARCHITECTURE.md the architect agent's primary source of truth
+- integrate forge-architect into quality-gate as 4th audit agent [task forgeflow-kiom]
+- integrate forge-architect into quality-gate as 4th audit agent [task forgeflow-kiom]
+- add forge-architect agent, schema categories, and model profile [task forgeflow-hkq5]
+- insert report generation step into quality-gate workflow [task forgeflow-b2yz]
+- add quality-gate-report command and audit-findings schema [task forgeflow-cbtp]
+- merge verify steps 3+4 into build-test gate [task forgeflow-paht]
+- update forge-verifier for detect-build-test [task forgeflow-xqdw]
+- add detect-build-test command [task forgeflow-9wnm]
+- add require_tests setting [task forgeflow-vxnz]
+- update phase-commands for phase-owned requirements [task forgeflow-syhj]
+- update project-commands for phase-owned requirements [task forgeflow-ru1k]
+- add cleanup orchestration to complete-milestone [task forgeflow-55fc]
+- add milestone cleanup commands [task forgeflow-d3wa]
+- add FP persistence commands for quality gate [task forgeflow-lado]
+- add quick tasks to dashboard with PR links [task forgeflow-cue8]
+- add CLI debugging techniques to debugger agent [task forgeflow-b396]
+- create QA agent with test runner/generator capabilities [task forgeflow-g2ri]
+- add code-graph navigation instructions to 9 agent prompts [task forgeflow-8myu]
+- add codebase intelligence persistence to map-codebase [task forgeflow-k5hu]
+- add build/CI verification gate to verify workflow [task forgeflow-u7ir]
+- executor signals completion via notes, verifier owns task closing [task forgeflow-cm68]
+- add project-context-slim command for lightweight phase resolution [task forgeflow-9m53]
+- add interactive onboarding flow to forge:help [task forgeflow-2u6b]
+- add actionable suggestion field to all negative/empty output paths [task forgeflow-nlxh]
+- add help-context command for forge:help mode detection [task forgeflow-a037]
+- add forge:status slash command for session orientation [task forgeflow-v1yz]
+- add cost-estimate command and surface in plan-phase workflow [task forgeflow-qb0u]
+- add cost-snapshot command for per-phase cost accumulation [task forgeflow-8qmr]
+- extend statusline bridge with cost/token data and wire as statusLine [task forgeflow-j15s]
+- add SHA-256 drift detection manifest [task forgeflow-8ara]
+- align forge:new milestone creation with new-milestone workflow [task forgeflow-f5g9]
+- rewrite dashboard with magazine-quality design [task forgeflow-ejp]
+- enhance all agents with personality-driven design [task forgeflow-qak]
+- add milestone-aware data collection for dashboard [task forgeflow-dp0]
+- add re-verify step (Step 7) after quality gate [task forgeflow-6noy]
+- implement monorepo-aware cwd resolution in find-project [task forgeflow-szz]
+- export findGitRoot and add extractWorkspacePath helper [task forgeflow-a7s]
+- integrate git lifecycle into quick.md workflow [task forgeflow-u05]
+- add quick-branch-create and quick-pr-create commands [task forgeflow-09k]
+- integrate quality gate into verify workflow and settings UI
+- add quality-gate workflow and command [task forgeflow-kh3]
+- register audit agents and quality_gate setting [task forgeflow-r8d]
+- add DoltHub remote setup prompt to forge:new workflow
+- add security audit agent [task forgeflow-3bu]
+- add performance audit agent [task forgeflow-fu6]
+- add code review audit agent [task forgeflow-b1p]
+- add monorepo-create command with workspace detection [task forgeflow-0vb]
+- cascading settings resolution for monorepo apps [task forgeflow-13t]
+- wire retro-query into plan-phase.md workflow [task forgeflow-vh9]
+- implement retro-query command [task forgeflow-eta]
+- fix edge case in context-write
+- surface retro suggestions in plan-phase workflow [task forgeflow-dpq]
+- add retro-query command [task forgeflow-joj]
+- capture structured retro at phase close [task forgeflow-ek9]
+- wire /forge:dashboard command [task forgeflow-rtq]
+- add dashboard workflow and HTML generator [task forgeflow-a81]
+- update researcher and planner for structured context [task forgeflow-d3v]
+- update executor for shared context read/write [task forgeflow-hyh]
+- add context-read and context-write commands [task forgeflow-vi3]
+- add context-check gate to plan discuss step [task forgeflow-dp3.1.2]
+- add hard verification gate blocking closure on failure
+- add branch lifecycle steps to phase workflows
+- add worktree lifecycle to milestone workflows
+- add git isolation commands to forge-tools
+- add migrate-orphan-phases command to forge-tools
+- require milestone-id in add-phase and wire parent-child to milestone
+- auto-create default milestone in new-project workflow
+- inject milestone req context into plan-phase planner prompt
+- add req-coverage check to verify-phase workflow
+- sync dep-discouragement language from forge-planner to plan-phase workflow
+- add forge:rollback command and rollback workflow
+- add bd init step 0 to new-project.md workflow
+- add resolve-phase command to fix loose phase ID matching
+- discourage unnecessary inter-task dependencies in forge-planner
+- auto-restart Dolt with bd dolt start on connection errors
+- add auto-verification gate to execute-phase Step 6
+- integrate checkpointing into execute-phase workflow
+- add checkpoint-save and checkpoint-load commands to forge-tools
+- integrate preflight-check gate into execute-phase workflow
+- reshape plan-check JSON output with findings array
+- structured actionable findings for plan-check
+- add forge:memories skill and expand memory schema docs
+- add preflight-check command to forge-tools.cjs
+- add auto-verification gate to execute-phase Step 4
+- add --skip-research flag to forge:plan
+- add context-check gate to plan-phase workflow
+- make forge:new hierarchy creation idempotent
+- surface phase notes/design in phase-context and executor prompts
+
+### Changed
+
+- apply code quality fixes from review [quality-gate]
+- extract Dolt restart wait as configurable constant [quality-gate]
+- apply code quality fixes from review [quality-gate]
+- add performance intent comments [quality-gate]
+- apply 7 code quality fixes from review [quality-gate]
+- optimize esc() to single-pass replace [quality-gate]
+- migrate dashboard and QG report to design-system.cjs [task forgeflow-vj0k]
+- apply 4 approved code quality fixes [quality-gate]
+- remove architecture-mismatch from code-reviewer [task forgeflow-vmov]
+- deduplicate code_navigation — single reference link per agent [task forgeflow-8myu]
+- eliminate redundant find-project and project-context calls [task forgeflow-vgty]
+- switch post-resolution steps to phase-context [task forgeflow-bvj2]
+- compress top-5 workflows and top-3 agent prompts [task forgeflow-irgy]
+- add structured forgeError helper and replace error patterns [task forgeflow-fiet]
+- reorder verify.md steps — quality gate before retrospective [task forgeflow-mcn5]
+- extract collectProjectIssues helper and fix bdArgs create calls
+- modularize forge-tools into domain modules [task forgeflow-qqc]
+
+### Fixed
+
+- add explicit subagent_type for forge-architect in commands and workflows
+- add connect-src 'self' to CSP header [task forgeflow-9izw]
+- use exact subagent_type values for plan-time audit agents
+- fix agent installation to deploy all 16 agents [task forgeflow-cety]
+- gate has_tests on actual test files in bd-memory and pyproject paths [task forgeflow-umdp]
+- apply 3 quality fixes from audit [quality-gate]
+- apply 7 quality fixes from audit [quality-gate]
+- apply security fixes from audit [quality-gate]
+- apply security fixes from audit [quality-gate]
+- apply 5 security fixes from audit [quality-gate]
+- fix detect-build-test false positive and agent discovery
+- apply 6 security fixes from audit [quality-gate]
+- wire insert-phase parent-child dep to milestone instead of project [task forgeflow-e7x2]
+- add slim context to plan-checker prompt [task forgeflow-ngw6]
+- apply 4 approved security fixes [quality-gate]
+- apply 9 approved quality-gate fixes [quality-gate]
+- harden quality-gate — execFileSync, temp file, FP hash pseudocode [quality-gate]
+- harden detect-build-test — allowlist, git root, sentinel [quality-gate]
+- DRY collectMilestoneRequirements + fix double-fetch [quality-gate]
+- apply quality-gate fixes from audit
+- apply quality-gate fixes from audit
+- trim forge-debugger.md to 399 lines (under 400 limit)
+- apply quality-gate fixes from audit
+- trim forge-qa.md to 199 lines (under 200 limit) [task forgeflow-g2ri]
+- apply 10 quality-gate fixes from audit
+- apply 8 quality-gate fixes from audit
+- address quality gate findings
+- recognize models and model_profile as valid global settings keys
+- close 3 integration gaps from milestone audit
+- make health NOT_FOUND path reachable for missing project IDs
+- apply audit fixes — validateId consolidation, N+1 mitigation, input validation, code quality
+- convert silent failures to structured forgeError responses [task forgeflow-dr8s]
+- apply audit fixes — permissions, validation, code quality, N+1 mitigation, async ops
+- wire status command to use computeCostEstimate shared helper [task forgeflow-qb0u]
+- apply approved fixes from audit
+- remove issue_type=feature fallback in classifyIssue [task forgeflow-yfl6]
+- fix health traversal and add orphan detection [task forgeflow-yfl6]
+- delegate to /forge:new-milestone instead of duplicating logic
+- auto-close satisfied requirements in verify and complete-milestone
+- apply 37 approved fixes from audit
+- show completion timestamps on phase cards
+- apply quality gate remediations
+- run requirement coverage check before PR creation
+- use correct dep field name in pr-create
+- apply approved audit fixes from pre-PR quality pipeline
+- apply approved audit fixes from pre-PR quality pipeline
+- apply approved fixes from audit
+- restore resolveSettings code deleted by monorepo-create commit
+- use dash separator in phase branch names to avoid git ref conflicts
+- enforce one project per repository
+- traverse milestone hierarchy for phase discovery
+- map verify.md retro data to context-write schema fields [task forgeflow-fub]
+- align plan-phase.md retro-query parsing with actual output fields
+- remove redundant full-progress call
+- replace bd kv refs with YAML settings in health.md [task forgeflow-sku]
+- enforce validates coverage + fix dep direction bug
+- make pr-create idempotent on re-run [task forgeflow-3ce]
+- use d.dependency_type instead of d.type in pr-create [task forgeflow-613]
+- add git checkout after branch-create [task forgeflow-7ir]
+- normalize bdJson to unwrap arrays for show commands [task forgeflow-09t]
+- find-project defaults to cwd settings.yaml [task forgeflow-7os]
+- remove incorrect project-id branch prefix in pr-create [task forgeflow-3ur]
+- output dashboard to .forge/ in CWD and gitignore it
+- output dashboard to .forge/ in CWD and gitignore it
+- add branch checkout gate to execute-phase workflow
+- use context-read/context-write wrappers in executor workflow [task forgeflow-hyh]
+- fix bd remember syntax to use --key flag [task forgeflow-dp3.1.3]
+- restore features regressed by git isolation commit (55071ef)
+- update all bd remember calls to use --key flag syntax
+
+### Documentation
+
+- update conventions and workflows for phase-owned requirements [task forgeflow-enjf]
+- create standardized agent template reference doc [task forgeflow-b2xg]
+- create code-graph reference doc and update CLAUDE.md [task forgeflow-5mm5]
+- add banner image to README
+- define shared audit findings JSON schema [task forgeflow-df3]
+- add monorepo conventions to conventions.md [task forgeflow-t96]
+- fix dashboard.md incorrect full-progress comment [task forgeflow-2mq]
+
+### Other
+
+- replace inline JSON shapes with schema references in workflow prompts [task forgeflow-ftbb]
+- fix stale JSDoc referencing removed cost data [quality-gate]
+- remove cost-estimation code from project-commands and status skill [task forgeflow-8xqy]
+- remove cost steps from workflow files [task forgeflow-rbac]
+- remove forge-statusline hook from project
+- remove dead generateDashboardHTML export from core.cjs [task forgeflow-5n1]
+- rename CI checks, drop Node 18, add engines field
+- remove Homebrew and npx install methods, keep manual only
+- remove stale forge:session:current-phase write from plan-phase workflow
