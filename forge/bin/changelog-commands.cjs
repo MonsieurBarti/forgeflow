@@ -191,6 +191,107 @@ module.exports = {
     });
   },
 
-  // Expose the parser so version-bump can reuse it
+  /**
+   * Bump the version in package.json based on Conventional Commits.
+   * Auto-detects bump level: breaking! -> major, feat -> minor, else -> patch.
+   * Supports --level=major|minor|patch override.
+   *
+   * Args: [--level=major|minor|patch]
+   */
+  'version-bump'(args) {
+    const levelFlag = (args || []).find(a => a.startsWith('--level='));
+    const explicitLevel = levelFlag ? levelFlag.split('=')[1] : null;
+
+    if (explicitLevel && !['major', 'minor', 'patch'].includes(explicitLevel)) {
+      forgeError('INVALID_INPUT', `Invalid level: ${explicitLevel}`, 'Use --level=major|minor|patch');
+    }
+
+    // Find package.json
+    const gitRoot = findGitRoot(process.cwd());
+    const pkgPath = gitRoot ? path.join(gitRoot, 'package.json') : path.join(process.cwd(), 'package.json');
+
+    let pkgText;
+    try {
+      pkgText = fs.readFileSync(pkgPath, 'utf8');
+    } catch {
+      forgeError('MISSING_FILE', 'package.json not found', `Expected at: ${pkgPath}. Ensure you are in a project directory.`);
+    }
+
+    let pkg;
+    try {
+      pkg = JSON.parse(pkgText);
+    } catch {
+      forgeError('INVALID_INPUT', 'package.json is not valid JSON', `Check syntax at: ${pkgPath}`);
+    }
+
+    const previousVersion = pkg.version || '0.0.0';
+
+    // Determine bump level
+    let level = explicitLevel;
+    let autoDetected = !explicitLevel;
+
+    if (!level) {
+      // Auto-detect from CC types since last tag
+      const lastTag = git(['describe', '--tags', '--abbrev=0'], { allowFail: true })?.trim() || '';
+      const commits = parseConventionalCommits(lastTag);
+
+      const hasBreaking = commits.some(c => c.breaking);
+      const hasFeat = commits.some(c => c.type === 'feat');
+
+      if (hasBreaking) level = 'major';
+      else if (hasFeat) level = 'minor';
+      else level = 'patch';
+    }
+
+    // Bump version
+    const parts = previousVersion.split('.').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      forgeError('INVALID_INPUT', `Current version "${previousVersion}" is not valid semver`, 'Version must be in X.Y.Z format');
+    }
+
+    if (level === 'major') {
+      parts[0]++;
+      parts[1] = 0;
+      parts[2] = 0;
+    } else if (level === 'minor') {
+      parts[1]++;
+      parts[2] = 0;
+    } else {
+      parts[2]++;
+    }
+
+    const newVersion = parts.join('.');
+
+    // Validate the new version is strictly greater
+    const prevParts = previousVersion.split('.').map(Number);
+    const isGreater = parts[0] > prevParts[0] ||
+      (parts[0] === prevParts[0] && parts[1] > prevParts[1]) ||
+      (parts[0] === prevParts[0] && parts[1] === prevParts[1] && parts[2] > prevParts[2]);
+
+    if (!isGreater) {
+      forgeError('INVALID_INPUT', `Computed version ${newVersion} is not greater than current ${previousVersion}`, 'This should not happen. Check the bump logic or use --level to override.');
+    }
+
+    // Validate new version is strict semver
+    if (!/^\d+\.\d+\.\d+$/.test(newVersion)) {
+      forgeError('INVALID_INPUT', `Computed version "${newVersion}" is not valid semver`, 'Version must be in X.Y.Z format');
+    }
+
+    // Write back with 2-space indent (standard for package.json)
+    pkg.version = newVersion;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+    output({
+      bumped: true,
+      previousVersion,
+      newVersion,
+      level,
+      autoDetected,
+    });
+  },
+
+  // Expose helpers for internal reuse
   _parseConventionalCommits: parseConventionalCommits,
+  _formatChangelogSection: formatChangelogSection,
+  _groupBySection: groupBySection,
 };
