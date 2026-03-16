@@ -1914,7 +1914,7 @@ module.exports = {
     // Explicit project argument takes precedence.
     if (args && args.length > 0) {
       const projectId = args[0];
-      output({ found: true, project_id: projectId, source: 'argument' });
+      output({ found: true, project_id: projectId, source: 'argument' }, 'find-project');
       return;
     }
 
@@ -1926,7 +1926,7 @@ module.exports = {
         if (issues.length === 1) {
           // Single project — backward compat, return it directly
           const project = issues[0];
-          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
+          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' }, 'find-project');
           return;
         }
         if (issues.length > 1) {
@@ -1954,7 +1954,7 @@ module.exports = {
               }
             }
             if (bestMatch) {
-              output({ found: true, project_id: bestMatch.id, project_title: bestMatch.title || bestMatch.subject, projects: issues, source: 'cwd_monorepo' });
+              output({ found: true, project_id: bestMatch.id, project_title: bestMatch.title || bestMatch.subject, projects: issues, source: 'cwd_monorepo' }, 'find-project');
               return;
             }
 
@@ -1966,19 +1966,19 @@ module.exports = {
                 const monoIssues = Array.isArray(monoData) ? monoData : (monoData.issues || []);
                 if (monoIssues.length > 0) {
                   const mono = monoIssues[0];
-                  output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' });
+                  output({ found: true, project_id: mono.id, project_title: mono.title || mono.subject, projects: issues, source: 'monorepo_parent' }, 'find-project');
                   return;
                 }
               } catch { /* INTENTIONALLY SILENT: monorepo lookup failure falls through to first-project fallback */ }
             }
             // Still no match — return first project as last resort (only inside a git repo)
             const firstProject = issues[0];
-            output({ found: true, project_id: firstProject.id, project_title: firstProject.title || firstProject.subject, projects: issues, source: 'beads' });
+            output({ found: true, project_id: firstProject.id, project_title: firstProject.title || firstProject.subject, projects: issues, source: 'beads' }, 'find-project');
             return;
           }
           // Outside a git repo — skip monorepo lookup; return first project
           const project = issues[0];
-          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' });
+          output({ found: true, project_id: project.id, project_title: project.title || project.subject, projects: issues, source: 'beads' }, 'find-project');
           return;
         }
       } catch {
@@ -1993,7 +1993,7 @@ module.exports = {
         const raw = fs.readFileSync(settingsPath, 'utf8');
         const settings = parseSimpleYaml(raw);
         if (settings && settings.project_id) {
-          output({ found: true, project_id: settings.project_id, source: 'cwd_settings' });
+          output({ found: true, project_id: settings.project_id, source: 'cwd_settings' }, 'find-project');
           return;
         }
       } catch {
@@ -2004,7 +2004,7 @@ module.exports = {
     output({
       found: false,
       suggestion: 'Run /forge:new to initialize a project, or check that bd is running with: bd list'
-    });
+    }, 'find-project');
   },
 
   /**
@@ -2016,7 +2016,7 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: text', 'Run: forge-tools remember <text-to-remember>');
     }
     bdArgs(['remember', ...args]);
-    output({ ok: true, memory });
+    output({ ok: true, memory }, 'find-project');
   },
 
   /**
@@ -2042,7 +2042,7 @@ module.exports = {
         phases_complete: phases.filter(p => p.status === 'closed').length,
         phases_in_progress: phases.filter(p => p.status === 'in_progress').length,
       },
-    });
+    }, 'project-context');
   },
 
   /**
@@ -2133,7 +2133,7 @@ module.exports = {
       },
       current_phase: currentPhase ? { id: currentPhase.id, title: currentPhase.title, status: currentPhase.status } : null,
       memories: memories || null,
-    });
+    }, 'progress');
   },
 
   /**
@@ -2175,7 +2175,7 @@ module.exports = {
         details: reqCoverage,
       },
       memories: memories || null,
-    });
+    }, 'progress');
   },
 
   /**
@@ -2229,7 +2229,7 @@ module.exports = {
         title: `${data.projectTitle} - Dashboard`,
         routes,
       }).then((decision) => {
-        output({ interactive: true, projectId, action: decision.action || 'close' });
+        output({ interactive: true, projectId, action: decision.action || 'close' }, 'dashboard');
       });
     }
 
@@ -2248,7 +2248,7 @@ module.exports = {
     }
     fs.writeFileSync(resolvedFilePath, html, 'utf8');
 
-    output({ path: resolvedFilePath, projectId, timestamp: data.timestamp });
+    output({ path: resolvedFilePath, projectId, timestamp: data.timestamp }, 'dashboard');
   },
 
   /**
@@ -2293,7 +2293,7 @@ module.exports = {
     const memoryValue = `${timestamp} project=${projectId} phase=${sessionData.current_phase || 'none'} progress=${completedPhases}/${phases.length} in_flight=${inProgressTasks.map(t => t.id).join(',')}`;
     bdArgs(['remember', '--key', memoryKey, memoryValue], { allowFail: true });
 
-    output({ saved: true, session: sessionData });
+    output({ saved: true, session: sessionData }, 'session-save');
   },
 
   /**
@@ -2317,7 +2317,7 @@ module.exports = {
         found: false,
         memories: memories || null,
         suggestion: 'No project found. Run /forge:new to create a project, then /forge:plan to set up phases before resuming'
-      });
+      }, 'session-load');
       return;
     }
 
@@ -2342,7 +2342,7 @@ module.exports = {
       phases_completed: phases.filter(p => p.status === 'closed').length,
       phases_total: phases.length,
       memories: memories || null,
-    });
+    }, 'session-load');
   },
 
   /**
@@ -2683,7 +2683,7 @@ module.exports = {
         warnings: warnings.length,
         suggestions: suggestions.length,
       },
-    });
+    }, 'health');
   },
 
   /**
@@ -2704,7 +2704,7 @@ module.exports = {
       settings,
       global_path: GLOBAL_SETTINGS_PATH,
       project_path: path.resolve(process.cwd(), PROJECT_SETTINGS_NAME),
-    });
+    }, 'settings-load');
   },
 
   /**
@@ -2739,7 +2739,7 @@ module.exports = {
     if (scope === 'global' || scope === 'project') {
       const filePath = scope === 'global' ? GLOBAL_SETTINGS_PATH : path.resolve(process.cwd(), PROJECT_SETTINGS_NAME);
       mutateSettingsFile(scope, filePath, (existing) => { setNestedKey(existing, topKey, subKey, parsedValue); });
-      output({ ok: true, scope, key, value: parsedValue });
+      output({ ok: true, scope, key, value: parsedValue }, 'settings-set');
     } else {
       forgeError('INVALID_INPUT', `Invalid scope: ${scope}`, 'Scope must be "global" or "project"', { scope });
     }
@@ -2765,7 +2765,7 @@ module.exports = {
       } catch { /* INTENTIONALLY SILENT: file may not exist; nothing to clear */ }
     }
 
-    output({ ok: true, scope, key, cleared: true });
+    output({ ok: true, scope, key, cleared: true }, 'settings-clear');
   },
 
   /**
@@ -2807,7 +2807,7 @@ module.exports = {
       });
     }
 
-    output({ ok: true, scope, updated: results });
+    output({ ok: true, scope, updated: results }, 'settings-bulk-set');
   },
 
   /**
@@ -2825,7 +2825,7 @@ module.exports = {
     if (rawFlag) {
       process.stdout.write(result.model || '');
     } else {
-      output({ agent: ROLE_TO_AGENT[agent] || agent, ...result, profile: loadModelProfile() });
+      output({ agent: ROLE_TO_AGENT[agent] || agent, ...result, profile: loadModelProfile() }, 'resolve-model');
     }
   },
 
@@ -2839,7 +2839,7 @@ module.exports = {
     }
 
     const result = resolveAgentModel(role);
-    output({ role, model: result.model, source: result.source });
+    output({ role, model: result.model, source: result.source }, 'resolve-role');
   },
 
   /**
@@ -2862,7 +2862,7 @@ module.exports = {
       effective,
       agents,
       available_profiles: ['quality', 'balanced', 'budget'],
-    });
+    }, 'model-assignments');
   },
 
   /**
@@ -2875,7 +2875,7 @@ module.exports = {
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     const value = bdArgs(['kv', 'get', fullKey], { allowFail: true });
-    output({ key: fullKey, value: value || null });
+    output({ key: fullKey, value: value || null }, 'config-get');
   },
 
   /**
@@ -2889,7 +2889,7 @@ module.exports = {
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     bdArgs(['kv', 'set', fullKey, value]);
-    output({ ok: true, key: fullKey, value });
+    output({ ok: true, key: fullKey, value }, 'config-set');
   },
 
   /**
@@ -2918,7 +2918,7 @@ module.exports = {
         { key: 'forge.update_check', default: 'true', description: 'Enable update check on session start' },
         { key: 'forge.auto_research', default: 'true', description: 'Auto-run research before planning' },
       ],
-    });
+    }, 'config-list');
   },
 
   /**
@@ -2931,7 +2931,7 @@ module.exports = {
     }
     const fullKey = key.startsWith('forge.') ? key : `forge.${key}`;
     bdArgs(['kv', 'clear', fullKey], { allowFail: true });
-    output({ ok: true, key: fullKey, cleared: true });
+    output({ ok: true, key: fullKey, cleared: true }, 'config-clear');
   },
 
   /**
@@ -2941,7 +2941,7 @@ module.exports = {
     const result = bd('list --label forge:debug --status open --json', { allowFail: true });
     const debugHint = 'No active debug sessions. Start one with: forge-tools debug-create <slug>';
     if (!result) {
-      output({ sessions: [], suggestion: debugHint });
+      output({ sessions: [], suggestion: debugHint }, 'debug-sessions');
       return;
     }
     try {
@@ -2954,11 +2954,11 @@ module.exports = {
         notes: i.notes || '',
         description: i.description || '',
       }));
-      output({ sessions });
+      output({ sessions }, 'debug-sessions');
     } catch {
       // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
       // This is not a fatal error -- the user simply has no debug sessions.
-      output({ sessions: [], suggestion: debugHint });
+      output({ sessions: [], suggestion: debugHint }, 'debug-sessions');
     }
   },
 
@@ -2984,7 +2984,7 @@ module.exports = {
     bdArgs(['label', 'add', debugId, 'forge:debug'], { allowFail: true });
     bdArgs(['update', debugId, '--status=in_progress'], { allowFail: true });
 
-    output({ debug_id: debugId, slug });
+    output({ debug_id: debugId, slug }, 'debug-create');
   },
 
   /**
@@ -3014,7 +3014,7 @@ module.exports = {
       forgeError('INVALID_INPUT', `Unknown field: ${field}`, 'Valid fields are: notes, design, status', { field });
     }
 
-    output({ updated: true, id });
+    output({ updated: true, id }, 'debug-update');
   },
 
   /**
@@ -3024,7 +3024,7 @@ module.exports = {
     const todoHint = 'No open todos. Create one with: forge-tools todo-create <project-id> <title>';
     const result = bd('list --label forge:todo --status open --json', { allowFail: true });
     if (!result) {
-      output({ todo_count: 0, todos: [], suggestion: todoHint });
+      output({ todo_count: 0, todos: [], suggestion: todoHint }, 'todo-list');
       return;
     }
     try {
@@ -3038,11 +3038,11 @@ module.exports = {
         notes: i.notes || '',
         created_at: i.created_at || i.created || '',
       }));
-      output({ todo_count: todos.length, todos });
+      output({ todo_count: todos.length, todos }, 'todo-list');
     } catch {
       // INTENTIONALLY SILENT: bd list JSON parse failure returns empty set with suggestion.
       // This is not a fatal error -- the user simply has no todos.
-      output({ todo_count: 0, todos: [], suggestion: todoHint });
+      output({ todo_count: 0, todos: [], suggestion: todoHint }, 'todo-list');
     }
   },
 
@@ -3080,7 +3080,7 @@ module.exports = {
     bdArgs(['label', 'add', todoId, 'forge:todo'], { allowFail: true });
     bdArgs(['dep', 'add', todoId, projectId, '--type=parent-child'], { allowFail: true });
 
-    output({ todo_id: todoId });
+    output({ todo_id: todoId }, 'todo-create');
   },
 
   /**
@@ -3125,7 +3125,7 @@ module.exports = {
       project_id: projectId,
       milestones: result,
       total: result.length,
-    });
+    }, 'milestones-list');
   },
 
   /**
@@ -3206,7 +3206,7 @@ module.exports = {
         partial: partial.length,
         unsatisfied: uncovered.length,
       },
-    });
+    }, 'milestone-audit');
   },
 
   /**
@@ -3237,7 +3237,7 @@ module.exports = {
       milestone_id: created.id,
       title,
       project_id: projectId,
-    });
+    }, 'milestone-create');
   },
 
   /**
@@ -3299,7 +3299,7 @@ module.exports = {
       title,
       detection_source: detected.source,
       children,
-    });
+    }, 'monorepo-init');
   },
 
   'init-quick'(args) {
@@ -3331,7 +3331,7 @@ module.exports = {
       description,
       models,
       settings: merged,
-    });
+    }, 'monorepo-detect');
   },
 
   /**
@@ -3466,7 +3466,7 @@ module.exports = {
       context_percent: contextPercent,
       suggested_action: suggestedAction,
       ...(bridgeNote ? { _notes: { bridge: bridgeNote } } : {}),
-    });
+    }, 'status');
   },
 
   /**
@@ -3492,7 +3492,7 @@ module.exports = {
     }
 
     if (!project) {
-      output({ mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' });
+      output({ mode: 'onboarding', reason: 'no_project', suggestion: 'Run /forge:new to get started' }, 'help-context');
       return;
     }
 
@@ -3527,6 +3527,6 @@ module.exports = {
       has_milestone: hasMilestone,
       has_phases: hasPhases,
       active_phase_number: activePhaseNumber,
-    });
+    }, 'help-context');
   },
 };

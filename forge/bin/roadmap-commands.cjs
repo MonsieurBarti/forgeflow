@@ -19,19 +19,19 @@ module.exports = {
     const projectsRaw = bd('list --label forge:project --json', { allowFail: true });
     const noProjectHint = 'Run /forge:new to create a project before migrating phases';
     if (!projectsRaw) {
-      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint }, 'migrate-orphan-phases');
       return;
     }
     let projectsData;
     try {
       projectsData = JSON.parse(projectsRaw);
     } catch {
-      output({ ok: false, message: 'Failed to parse project list from bd', suggestion: 'Check bd connectivity with: bd list --limit 1' });
+      output({ ok: false, message: 'Failed to parse project list from bd', suggestion: 'Check bd connectivity with: bd list --limit 1' }, 'migrate-orphan-phases');
       return;
     }
     const projects = Array.isArray(projectsData) ? projectsData : (projectsData.issues || []);
     if (projects.length === 0) {
-      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint });
+      output({ ok: true, message: 'No projects found', actions: [], suggestion: noProjectHint }, 'migrate-orphan-phases');
       return;
     }
 
@@ -89,6 +89,6 @@ module.exports = {
       orphans_found: actions.filter(a => a.type === 'linked_phase').length,
       milestones_created: actions.filter(a => a.type === 'created_milestone').length,
       actions,
-    });
+    }, 'migrate-orphan-phases');
   },
 };

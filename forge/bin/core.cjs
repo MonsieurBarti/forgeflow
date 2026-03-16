@@ -393,7 +393,23 @@ function validateId(id) {
   }
 }
 
-function output(data) {
+// Lazy-loaded reference to schemas.cjs validate function.
+// Kept at module level so the require() only runs once.
+let _validateFn = null;
+
+function output(data, schemaName) {
+  if (schemaName) {
+    try {
+      if (!_validateFn) {
+        _validateFn = require(require('path').join(__dirname, '..', 'schemas', 'schemas.cjs')).validate;
+      }
+      _validateFn(schemaName, data);
+    } catch (err) {
+      // INTENTIONALLY DEGRADED: schema layer failure must never block output.
+      // Log and continue so the command still emits valid JSON.
+      console.error(`[output] Schema validation unavailable: ${err.message}`);
+    }
+  }
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
 }
 
@@ -412,6 +428,15 @@ function forgeError(code, message, suggestion, context) {
   const payload = { error: true, code, message, suggestion };
   if (context !== undefined && context !== null) {
     payload.context = context;
+  }
+  // Validate against 'forge-error' schema (separate path to avoid circular errors).
+  try {
+    if (!_validateFn) {
+      _validateFn = require(require('path').join(__dirname, '..', 'schemas', 'schemas.cjs')).validate;
+    }
+    _validateFn('forge-error', payload);
+  } catch (_) {
+    // INTENTIONALLY SILENT: schema validation failure must never prevent error output.
   }
   process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   process.exit(1);

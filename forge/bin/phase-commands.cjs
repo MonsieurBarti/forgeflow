@@ -443,7 +443,7 @@ module.exports = {
         in_progress: inProgress.length,
         done: done.length,
       },
-    });
+    }, 'phase-context');
   },
 
   /**
@@ -460,7 +460,7 @@ module.exports = {
     const tasks = normalizeChildren(children);
 
     const ready = tasks.filter(t => t.status === 'open');
-    output({ phase_id: phaseId, ready_tasks: ready });
+    output({ phase_id: phaseId, ready_tasks: ready }, 'ready-tasks');
   },
 
   /**
@@ -565,7 +565,7 @@ module.exports = {
         tasks_with_label: tasks.length - tasksWithoutLabel.length,
         uncovered_requirements: uncoveredReqs.length,
       },
-    });
+    }, 'plan-check');
   },
 
   /**
@@ -640,7 +640,7 @@ module.exports = {
       phase_title: phase?.title,
       verdict,
       issues,
-    });
+    }, 'preflight-check');
   },
 
   /**
@@ -658,7 +658,7 @@ module.exports = {
     const tasks = normalizeChildren(children);
 
     if (tasks.length === 0) {
-      output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } });
+      output({ phase_id: phaseId, waves: [], summary: { total_tasks: 0, total_waves: 0 } }, 'detect-waves');
       return;
     }
 
@@ -699,7 +699,7 @@ module.exports = {
         tasks_in_progress: tasks.filter(t => t.status === 'in_progress').length,
         tasks_closed: tasks.filter(t => t.status === 'closed').length,
       },
-    });
+    }, 'detect-waves');
   },
 
   /**
@@ -739,7 +739,7 @@ module.exports = {
     const memoryKey = `forge:checkpoint:${phaseId}`;
     bdArgs(['remember', '--key', memoryKey, checkpointJson], { allowFail: true });
 
-    output({ saved: true, phase_id: phaseId, checkpoint });
+    output({ saved: true, phase_id: phaseId, checkpoint }, 'checkpoint-save');
   },
 
   /**
@@ -784,7 +784,7 @@ module.exports = {
     }
 
     if (!checkpoint) {
-      output({ found: false, suggestion: 'No checkpoint found for this phase. Save one with: forge-tools checkpoint-save <phase-id> <checkpoint-json>' });
+      output({ found: false, suggestion: 'No checkpoint found for this phase. Save one with: forge-tools checkpoint-save <phase-id> <checkpoint-json>' }, 'checkpoint-load');
       return;
     }
 
@@ -795,7 +795,7 @@ module.exports = {
       if (checkpoint[key] !== undefined) safe[key] = checkpoint[key];
     }
 
-    output(safe);
+    output(safe, 'checkpoint-load');
   },
 
   /**
@@ -852,7 +852,7 @@ module.exports = {
       total_closed: closedTasks.length,
       total_open: openTasks.length,
       requirements_count: requirements.length,
-    });
+    }, 'verify-phase');
   },
 
   /**
@@ -930,7 +930,7 @@ module.exports = {
       project_id: projectId,
       milestone_id: milestoneId,
       total_phases: phases.length + 1,
-    });
+    }, 'add-phase');
   },
 
   /**
@@ -1056,7 +1056,7 @@ module.exports = {
       project_id: projectId,
       milestone_id: parentId !== projectId ? parentId : null,
       rewired_next: nextPhase ? { id: nextPhase.id, title: nextPhase.title } : null,
-    });
+    }, 'insert-phase');
   },
 
   /**
@@ -1189,7 +1189,7 @@ module.exports = {
       },
       renumbered,
       remaining_phases: phases.length - 1,
-    });
+    }, 'remove-phase');
   },
 
   /**
@@ -1220,7 +1220,7 @@ module.exports = {
       project_id: projectId,
       phases: parsed,
       total: parsed.length,
-    });
+    }, 'list-phases');
   },
 
   /**
@@ -1241,7 +1241,7 @@ module.exports = {
 
     const children = bdJsonArgs(['children', projectId]);
     if (!children) {
-      output({ found: false, phase: null, suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId });
+      output({ found: false, phase: null, suggestion: 'No phases found for this project. Run /forge:plan to create phases, or verify the project ID with: bd show ' + projectId }, 'resolve-phase');
       return;
     }
 
@@ -1257,10 +1257,10 @@ module.exports = {
 
     const found = numbered.find(entry => entry.n === num);
     if (found) {
-      output({ found: true, phase: found.phase });
+      output({ found: true, phase: found.phase }, 'resolve-phase');
     } else {
       const availableNums = numbered.map(e => e.n).join(', ');
-      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })), suggestion: 'Phase ' + num + ' does not exist. Available phase numbers: ' + availableNums + '. Use one of these with: forge-tools resolve-phase ' + projectId + ' <number>' });
+      output({ found: false, phase: null, available: numbered.map(e => ({ n: e.n, id: e.phase.id, title: e.phase.title })), suggestion: 'Phase ' + num + ' does not exist. Available phase numbers: ' + availableNums + '. Use one of these with: forge-tools resolve-phase ' + projectId + ' <number>' }, 'resolve-phase');
     }
   },
 
@@ -1309,7 +1309,7 @@ module.exports = {
 
     try {
       bdArgs(['comments', 'add', phaseId, '-f', tmpFile]);
-      output({ written: true, phase_id: phaseId, agent: schema.agent, task: schema.task });
+      output({ written: true, phase_id: phaseId, agent: schema.agent, task: schema.task }, 'context-write');
     } finally {
       // INTENTIONALLY SILENT: temp file/dir cleanup is best-effort; failure to remove
       // a /tmp entry does not affect the command's result.
@@ -1331,7 +1331,7 @@ module.exports = {
     // All structured context entries (any agent, must have a status field)
     const contexts = readAgentContextEntries(phaseId).filter(e => e.status);
 
-    output({ phase_id: phaseId, contexts });
+    output({ phase_id: phaseId, contexts }, 'context-read');
   },
 
   /**
@@ -1428,7 +1428,7 @@ module.exports = {
       lessons,
       pitfall_flags: pitfallFlags,
       effectiveness_ratings: effectivenessRatings,
-    });
+    }, 'retro-query');
   },
 
   /**
@@ -1437,7 +1437,7 @@ module.exports = {
    */
   'detect-build-test'(_args) {
     const result = detectBuildTest();
-    output(result);
+    output(result, 'detect-build-test');
   },
 
   /**
@@ -1461,7 +1461,7 @@ module.exports = {
       tasks: w.tasks.map(({ description, acceptance_criteria, ...rest }) => rest),
     }));
 
-    output({ ...data, waves });
+    output({ ...data, waves }, 'implementation-preview');
   },
 
   /**
@@ -1489,7 +1489,7 @@ module.exports = {
     const data = collectPlanData(phaseId);
 
     if (!settings.web_ui) {
-      output({ fallback: true, data });
+      output({ fallback: true, data }, 'plan-interactive-review');
       return;
     }
 
@@ -1505,7 +1505,7 @@ module.exports = {
       const { action, edits = [], comments = [], removals = [] } = decision || {};
 
       if (action === 'reject') {
-        output({ action: 'reject' });
+        output({ action: 'reject' }, 'plan-interactive-review');
         return;
       }
 
@@ -1585,7 +1585,7 @@ module.exports = {
         edits_applied: appliedCount,
         comments_applied: comments.length,
         removals_applied: removals.length,
-      });
+      }, 'plan-interactive-review');
     }).catch((err) => {
       forgeError('SERVER_ERROR', `Plan review server failed: ${err.message}`,
         'Retry or set web_ui=false to use the CLI fallback');
