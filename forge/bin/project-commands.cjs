@@ -9,7 +9,7 @@
  *           config-get, config-set, config-list, config-clear, health,
  *           debug-list, debug-create, debug-update, todo-list, todo-create,
  *           milestone-list, milestone-audit, milestone-create, monorepo-create, remember, init-quick,
- *           cost-snapshot, cost-estimate, status, help-context
+ *           status, help-context
  */
 
 const fs = require('fs');
@@ -1043,103 +1043,6 @@ function getRequirementCoverage(requirements) {
     });
   }
   return coverage;
-}
-
-/**
- * Compute cost estimate for a phase based on historical sibling phase costs.
- * Shared logic used by both `status` and `cost-estimate` commands.
- * Returns { estimated_cost_usd, avg_cost_per_task, task_count, historical_phases_used, confidence }
- */
-function computeCostEstimate(phaseId) {
-  const phase = bdJsonArgs(['show', phaseId]);
-  if (!phase) return { estimated_cost_usd: null, avg_cost_per_task: null, task_count: 0, historical_phases_used: 0, confidence: 'none' };
-
-  // Find parent milestone/project
-  const depUpRaw = bdArgs(['dep', 'list', phaseId, '--direction=up', '--type=parent-child', '--json'], { allowFail: true });
-  let parentId = null;
-  if (depUpRaw) {
-    try {
-      const deps = JSON.parse(depUpRaw);
-      const depList = Array.isArray(deps) ? deps : (deps.dependencies || deps.issues || []);
-      for (const dep of depList) {
-        const depId = dep.dependency_id || dep.id || dep;
-        if (typeof depId === 'string') {
-          const parentBead = bdJsonArgs(['show', depId]);
-          if (parentBead) {
-            const labels = parentBead.labels || [];
-            if (labels.includes('forge:milestone') || labels.includes('forge:project')) {
-              parentId = depId;
-              break;
-            }
-          }
-        }
-      }
-    } catch { /* INTENTIONALLY SILENT: non-JSON bd output falls back to empty/null */ }
-  }
-
-  // Get sibling closed phases
-  let siblingPhases = [];
-  if (parentId) {
-    const siblings = normalizeChildren(bdJsonArgs(['children', parentId]));
-    siblingPhases = siblings.filter(i =>
-      (i.labels || []).includes('forge:phase') &&
-      i.status === 'closed' &&
-      i.id !== phaseId
-    );
-  }
-
-  // TODO(perf): N+1 subprocess -- calls bd kv get per sibling phase. Needs bd CLI batch-query support.
-  const historicalCosts = [];
-  for (const sibling of siblingPhases) {
-    const costRaw = bdArgs(['kv', 'get', `forge.cost.${sibling.id}`], { allowFail: true });
-    if (!costRaw || costRaw.includes('(not set)')) continue;
-    try {
-      const costData = JSON.parse(costRaw.trim());
-      if (costData && typeof costData.total_usd === 'number' && costData.total_usd > 0) {
-        // Use stored task_count; default to 0 for historical records missing it
-        // (avoids an N+1 bdJson call per sibling phase).
-        const taskCount = typeof costData.task_count === 'number' ? costData.task_count : 0;
-        if (taskCount > 0) {
-          historicalCosts.push({ phase_id: sibling.id, total_usd: costData.total_usd, task_count: taskCount });
-        }
-      }
-    } catch { /* INTENTIONALLY SILENT: invalid or missing JSON data is handled by null fallback */ }
-  }
-
-  // Count tasks in target phase
-  const targetChildren = normalizeChildren(bdJsonArgs(['children', phaseId]));
-  const targetTasks = targetChildren.filter(c => (c.labels || []).includes('forge:task'));
-  const taskCount = targetTasks.length;
-
-  const historicalCount = historicalCosts.length;
-  let confidence;
-  if (historicalCount === 0) confidence = 'none';
-  else if (historicalCount <= 2) confidence = 'low';
-  else if (historicalCount <= 5) confidence = 'medium';
-  else confidence = 'high';
-
-  if (taskCount === 0) {
-    const avgCpt = historicalCount > 0
-      ? Math.round((historicalCosts.reduce((sum, h) => sum + h.total_usd / h.task_count, 0) / historicalCount) * 100) / 100
-      : null;
-    return { estimated_cost_usd: 0, avg_cost_per_task: avgCpt, task_count: 0, historical_phases_used: historicalCount, confidence };
-  }
-
-  if (historicalCount === 0) {
-    return { estimated_cost_usd: null, avg_cost_per_task: null, task_count: taskCount, historical_phases_used: 0, confidence: 'none' };
-  }
-
-  const totalCostPerTask = historicalCosts.reduce((sum, h) => sum + h.total_usd / h.task_count, 0);
-  const avgCostPerTask = totalCostPerTask / historicalCount;
-  const estimatedCost = Math.round(avgCostPerTask * taskCount * 100) / 100;
-
-  return {
-    estimated_cost_usd: estimatedCost,
-    avg_cost_per_task: Math.round(avgCostPerTask * 100) / 100,
-    task_count: taskCount,
-    historical_phases_used: historicalCount,
-    confidence,
-  };
 }
 
 /**
@@ -3495,10 +3398,9 @@ module.exports = {
       };
     }
 
-    // 4. Read bridge file for context % and session cost
+    // 4. Read bridge file for context %
     const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
     let contextPercent = null;
-    let sessionCostUsd = null;
     let bridgeNote = null;
 
     try {
@@ -3515,9 +3417,6 @@ module.exports = {
         } else if (bridge.context_remaining !== undefined) {
           contextPercent = Math.round((1 - bridge.context_remaining) * 100);
         }
-        if (bridge.total_cost_usd !== undefined) {
-          sessionCostUsd = bridge.total_cost_usd;
-        }
       }
     } catch {
       // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
@@ -3525,29 +3424,7 @@ module.exports = {
       bridgeNote = 'Bridge file not found or unreadable';
     }
 
-    // 5. Read accumulated phase cost from bd kv
-    let phaseCostUsd = null;
-    if (currentPhase) {
-      const kvKey = `forge.cost.${currentPhase.id}`;
-      const costRaw = bdArgs(['kv', 'get', kvKey], { allowFail: true });
-      if (costRaw && costRaw.trim() !== '' && !costRaw.includes('(not set)')) {
-        try {
-          const costRecord = JSON.parse(costRaw.trim());
-          phaseCostUsd = costRecord.total_usd || 0;
-        } catch { /* INTENTIONALLY SILENT: corrupt cost data in bd kv falls back to null */ }
-      }
-    }
-
-    // 6. Estimate remaining cost using cost-estimate logic
-    let estimatedRemainingUsd = null;
-    if (currentPhase) {
-      const estimate = computeCostEstimate(currentPhase.id);
-      if (estimate.estimated_cost_usd !== null) {
-        estimatedRemainingUsd = estimate.estimated_cost_usd;
-      }
-    }
-
-    // 7. Determine suggested next action (same logic as forge:progress)
+    // 5. Determine suggested next action (same logic as forge:progress)
     let suggestedAction = null;
     if (currentPhase) {
       if (currentPhase.status === 'in_progress' && (tasks.ready > 0 || tasks.in_progress > 0)) {
@@ -3587,148 +3464,9 @@ module.exports = {
       } : null,
       tasks,
       context_percent: contextPercent,
-      session_cost_usd: sessionCostUsd,
-      phase_cost_usd: phaseCostUsd,
-      estimated_remaining_usd: estimatedRemainingUsd,
       suggested_action: suggestedAction,
       ...(bridgeNote ? { _notes: { bridge: bridgeNote } } : {}),
     });
-  },
-
-  /**
-   * Snapshot cost delta for a phase. Reads the context bridge file, computes
-   * the cost delta since the last snapshot, and persists accumulated cost data
-   * to bd kv under forge.cost.<phase-id>.
-   *
-   * Usage: forge-tools cost-snapshot <phase-id>
-   */
-  'cost-snapshot'(args) {
-    const phaseId = args[0];
-    if (!phaseId) {
-      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-snapshot <phase-id>');
-    }
-    validateId(phaseId);
-
-    // 1. Read bridge file
-    const bridgePath = path.join(os.tmpdir(), 'forge-context-bridge.json');
-    let bridgeData = null;
-    try {
-      const raw = fs.readFileSync(bridgePath, 'utf8');
-      bridgeData = JSON.parse(raw);
-    } catch {
-      // INTENTIONALLY SILENT: bridge file is ephemeral and may not exist;
-      // null bridgeData is handled by the warning output below.
-    }
-
-    if (!bridgeData || bridgeData.total_cost_usd === undefined || bridgeData.total_cost_usd === null) {
-      output({
-        warning: true,
-        message: 'Bridge file missing or has no cost data',
-        bridge_path: bridgePath,
-        phase_id: phaseId,
-      });
-      return;
-    }
-
-    const currentCost = bridgeData.total_cost_usd;
-    const inputTokens = bridgeData.input_tokens || 0;
-    const outputTokens = bridgeData.output_tokens || 0;
-
-    // 2. Read previous cost state from bd kv
-    const kvKey = `forge.cost.${phaseId}`;
-    const existingRaw = bd(`kv get ${kvKey}`, { allowFail: true });
-    let record = null;
-    if (existingRaw && existingRaw.trim() !== '' && !existingRaw.includes('(not set)')) {
-      try {
-        record = JSON.parse(existingRaw.trim());
-      } catch {
-        // INTENTIONALLY SILENT: corrupt cost record in bd kv is recoverable;
-        // starting fresh with null record is the correct self-healing behavior.
-        record = null;
-      }
-    }
-
-    const now = new Date().toISOString();
-
-    if (!record) {
-      // 3. First call: store baseline with empty sessions
-      record = {
-        total_usd: 0,
-        last_bridge_cost: currentCost,
-        sessions: [],
-        baseline_timestamp: now,
-      };
-    } else {
-      // 4. Subsequent call: compute delta and append session snapshot
-      const lastCost = record.last_bridge_cost !== undefined ? record.last_bridge_cost : 0;
-      const deltaUsd = currentCost - lastCost;
-
-      // Only record positive deltas (negative could happen on bridge reset)
-      const effectiveDelta = deltaUsd > 0 ? deltaUsd : 0;
-
-      record.total_usd = (record.total_usd || 0) + effectiveDelta;
-      record.last_bridge_cost = currentCost;
-      record.sessions = record.sessions || [];
-      record.sessions.push({
-        timestamp: now,
-        delta_usd: effectiveDelta,
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
-      });
-    }
-
-    // 5. Store task_count so computeCostEstimate can avoid an N+1 lookup
-    const phaseChildren = normalizeChildren(bdJsonArgs(['children', phaseId]));
-    record.task_count = phaseChildren.filter(c => (c.labels || []).includes('forge:task')).length;
-
-    // 6. Persist to bd kv
-    const serialized = JSON.stringify(record);
-    bdArgs(['kv', 'set', kvKey, serialized]);
-
-    // 7. Output result
-    output({
-      ok: true,
-      phase_id: phaseId,
-      kv_key: kvKey,
-      total_usd: record.total_usd,
-      sessions_count: record.sessions.length,
-      record,
-    });
-  },
-
-  /**
-   * Estimate cost for a phase based on historical cost data from completed phases.
-   *
-   * Queries bd kv for forge.cost.<id> across completed sibling phases in the same
-   * milestone (or project). Computes average cost per task and multiplies by the
-   * number of open tasks in the target phase.
-   *
-   * Usage: forge-tools cost-estimate <phase-id>
-   *
-   * Output JSON fields:
-   *   estimated_cost_usd  - projected cost (null if no historical data)
-   *   avg_cost_per_task   - average USD per task from historical phases
-   *   task_count          - number of open tasks in the target phase
-   *   historical_phases_used - number of completed phases with cost data
-   *   confidence          - 'none' | 'low' | 'medium' | 'high'
-   *
-   * NOTE: The forge-tools status command should call this to populate
-   * estimated_remaining_usd in its output.
-   */
-  'cost-estimate'(args) {
-    const phaseId = args[0];
-    if (!phaseId) {
-      forgeError('MISSING_ARG', 'Missing required argument: phase-id', 'Run: forge-tools cost-estimate <phase-id>');
-    }
-    validateId(phaseId);
-
-    const phase = bdJsonArgs(['show', phaseId]);
-    if (!phase) {
-      forgeError('NOT_FOUND', `Phase not found: ${phaseId}`, 'Verify the phase ID with: forge-tools list-phases <project-id>', { phaseId });
-    }
-
-    const result = computeCostEstimate(phaseId);
-    output({ phase_id: phaseId, ...result });
   },
 
   /**
