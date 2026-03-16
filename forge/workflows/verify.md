@@ -276,7 +276,7 @@ Runs only when phase is being closed. Skip if blocked.
   - "Other"
   - "No improvements needed"
 
-**Build context-write payload** from the 3 answers (recognized fields: `agent`, `task`, `status`, `findings`, `decisions`, `blockers`, `artifacts`, `next_steps`):
+**Build context-write payload** conforming to `agents/schemas/context-write.md` from the 3 answers:
 - **findings**: all selected items from Question 1 (what went well)
 - **blockers**: all selected items from Question 2 (what didn't go well)
 - **decisions**: all selected items from Question 3 (improvements)
