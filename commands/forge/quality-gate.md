@@ -32,7 +32,12 @@ MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model f
 ```
 
 When spawning audit agents (step 3), spawn all four Agent calls in the **same response** so
-they run in parallel. Pass the changed files list to each agent to scope their analysis.
+they run in parallel. Use the **exact** `subagent_type` values:
+- `subagent_type="forge-security-auditor"`
+- `subagent_type="forge-code-reviewer"`
+- `subagent_type="forge-performance-auditor"`
+- `subagent_type="forge-architect"`
+Pass the changed files list to each agent to scope their analysis.
 
 When parsing agent responses (step 4), apply tolerant JSON parsing: strip markdown fences,
 extract the JSON object between the first `{` and last `}`, validate the schema structure.

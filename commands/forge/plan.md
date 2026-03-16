@@ -31,6 +31,13 @@ Pass it the phase title, goal, project context, and any relevant codebase pointe
 When breaking the phase into tasks (step 5), use the Agent tool to spawn the **forge-planner** agent.
 Pass it the phase ID, project context, research findings, and user decisions.
 
+When running the plan-time quality gate (step 5.5), spawn three audit agents in parallel using
+three Agent tool calls in the same response. Use the **exact** `subagent_type` values below:
+- `subagent_type="forge-architect"` -- architectural review
+- `subagent_type="forge-security-auditor"` -- security review
+- `subagent_type="forge-performance-auditor"` -- performance review
+Resolve each agent's model via `resolve-model` first. If shift_left_gates is disabled, skip this step.
+
 When verifying the plan (step 6), use the Agent tool to spawn the **forge-plan-checker** agent.
 Pass it the phase ID and project ID so it can validate acceptance criteria, requirement coverage,
 task sizing, and dependency correctness. If the plan-checker returns NEEDS REVISION, fix the issues
