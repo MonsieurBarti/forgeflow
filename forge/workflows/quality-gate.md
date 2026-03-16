@@ -41,7 +41,7 @@ If a model resolves to empty, omit the `model` parameter from the Agent call for
 Spawn all four agents simultaneously using four Agent tool calls in the same response.
 Pass each agent the list of changed files so they scope their analysis.
 
-**Security Auditor:**
+**forge-security-auditor** (subagent_type="forge-security-auditor"):
 ```
 Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
 Audit the following changed files for security vulnerabilities.
@@ -55,7 +55,7 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")
 ```
 
-**Code Reviewer:**
+**forge-code-reviewer** (subagent_type="forge-code-reviewer"):
 ```
 Agent(subagent_type="forge-code-reviewer", model="<MODEL_REVIEWER or omit>", prompt="
 Review the following changed files for code quality issues.
@@ -69,7 +69,7 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")
 ```
 
-**Performance Auditor:**
+**forge-performance-auditor** (subagent_type="forge-performance-auditor"):
 ```
 Agent(subagent_type="forge-performance-auditor", model="<MODEL_PERF or omit>", prompt="
 Audit the following changed files for performance anti-patterns.
@@ -83,7 +83,7 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")
 ```
 
-**Architect:**
+**forge-architect** (subagent_type="forge-architect"):
 ```
 Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
 Audit the following changed files for architectural violations and adherence issues.

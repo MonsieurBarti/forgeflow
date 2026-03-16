@@ -334,7 +334,7 @@ If a model resolves to empty, omit the `model` parameter from the Agent call for
 Spawn all three agents simultaneously using three Agent tool calls in the same response.
 Each agent receives the task data from step 5.5b -- NOT code diffs.
 
-**Architect:**
+**forge-architect** (subagent_type="forge-architect"):
 ```
 Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
 Review the following planned tasks for architectural issues. These are task PLANS, not code
@@ -370,7 +370,7 @@ If all tasks look good, output findings as an empty array with a positive summar
 ")
 ```
 
-**Security Auditor:**
+**forge-security-auditor** (subagent_type="forge-security-auditor"):
 ```
 Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
 Review the following planned tasks for security concerns. These are task PLANS, not code
@@ -402,7 +402,7 @@ If all tasks look good, output findings as an empty array with a positive summar
 ")
 ```
 
-**Performance Auditor:**
+**forge-performance-auditor** (subagent_type="forge-performance-auditor"):
 ```
 Agent(subagent_type="forge-performance-auditor", model="<MODEL_PERF or omit>", prompt="
 Review the following planned tasks for performance concerns. These are task PLANS, not code

@@ -222,7 +222,7 @@ MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model f
 
 Spawn both agents in parallel using two Agent tool calls in the same response:
 
-**Security Auditor:**
+**forge-security-auditor** (subagent_type="forge-security-auditor"):
 ```
 Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
 Audit the following files changed in wave <N> for security vulnerabilities.
@@ -237,7 +237,7 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")
 ```
 
-**Architect:**
+**forge-architect** (subagent_type="forge-architect"):
 ```
 Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
 Audit the following files changed in wave <N> for architectural violations and adherence issues.
