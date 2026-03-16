@@ -8,6 +8,7 @@
 const { forgeError } = require('./core.cjs');
 const phaseCommands = require('./phase-commands.cjs');
 const contextCommands = require('./context-commands.cjs');
+const planReviewCommands = require('./plan-review-commands.cjs');
 const projectCommands = require('./project-commands.cjs');
 const settingsCommands = require('./settings-commands.cjs');
 const configCommands = require('./config-commands.cjs');
@@ -22,6 +23,7 @@ const commands = Object.assign(
   {},
   phaseCommands,
   contextCommands,
+  planReviewCommands,
   projectCommands,
   settingsCommands,
   configCommands,
