@@ -35,4 +35,10 @@ node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>
 ```
 
 If any tasks failed or are blocked, report the status before proceeding to the next wave.
+
+When running the per-wave shift-left gate (step 3.5), spawn two audit agents in parallel using
+two Agent tool calls in the same response. Use the **exact** `subagent_type` values:
+- `subagent_type="forge-security-auditor"` -- security audit of wave changes
+- `subagent_type="forge-architect"` -- architectural audit of wave changes
+Resolve each agent's model via `resolve-model` first. If shift_left_gates is disabled, skip this step.
 </execution_context>

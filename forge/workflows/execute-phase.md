@@ -25,16 +25,6 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-## 1.5. Snapshot Starting Cost
-
-Record cost baseline at phase start for token/cost tracking:
-
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id> start
-```
-
-This is best-effort — if it fails, continue execution.
-
 ## 2. Switch to Phase Branch
 
 Ensure commits land on the correct phase branch, not main. Use `branch-create` which is
@@ -180,12 +170,7 @@ Follow the same steps: claim, implement, verify, commit, signal completion.
 
 ### Wait for Wave Completion
 
-After all agents in a wave complete, snapshot the cost delta for this wave:
-```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" cost-snapshot <phase-id>
-```
-
-Then check results:
+After all agents in a wave complete, check results:
 ```bash
 PHASE=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id>)
 ```
@@ -237,7 +222,7 @@ MODEL_ARCHITECT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" resolve-model f
 
 Spawn both agents in parallel using two Agent tool calls in the same response:
 
-**Security Auditor:**
+**forge-security-auditor** (subagent_type="forge-security-auditor"):
 ```
 Agent(subagent_type="forge-security-auditor", model="<MODEL_SECURITY or omit>", prompt="
 Audit the following files changed in wave <N> for security vulnerabilities.
@@ -252,7 +237,7 @@ agents/schemas/audit-findings.md. Do NOT wrap JSON in markdown fences.
 ")
 ```
 
-**Architect:**
+**forge-architect** (subagent_type="forge-architect"):
 ```
 Agent(subagent_type="forge-architect", model="<MODEL_ARCHITECT or omit>", prompt="
 Audit the following files changed in wave <N> for architectural violations and adherence issues.
