@@ -11,6 +11,7 @@ const contextCommands = require('./context-commands.cjs');
 const projectCommands = require('./project-commands.cjs');
 const settingsCommands = require('./settings-commands.cjs');
 const configCommands = require('./config-commands.cjs');
+const milestoneCommands = require('./milestone-commands.cjs');
 const gitCommands = require('./git-commands.cjs');
 const roadmapCommands = require('./roadmap-commands.cjs');
 const qualityGateCommands = require('./quality-gate-commands.cjs');
@@ -24,6 +25,7 @@ const commands = Object.assign(
   projectCommands,
   settingsCommands,
   configCommands,
+  milestoneCommands,
   gitCommands,
   roadmapCommands,
   qualityGateCommands,
