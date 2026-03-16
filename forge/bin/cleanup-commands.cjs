@@ -6,7 +6,7 @@
  * Commands: milestone-cleanup-branches, milestone-close-beads, milestone-purge-memories
  */
 
-const { bdArgs, bdJsonArgs, git, output, forgeError, validateId, normalizeChildren } = require('./core.cjs');
+const { bdArgs, bdJsonArgs, git, output, forgeError, validateId, normalizeChildren, unwrapBdArray } = require('./core.cjs');
 
 /**
  * Collect all phase IDs that belong to a milestone.
@@ -132,8 +132,7 @@ module.exports = {
         closed.push(bead.id);
       } else {
         // Check if it's actually closed now
-        const check = bdJsonArgs(['show', bead.id]);
-        const item = Array.isArray(check) ? check[0] : check;
+        const item = unwrapBdArray(bdJsonArgs(['show', bead.id]));
         if (item?.status === 'closed') {
           closed.push(bead.id);
         } else {

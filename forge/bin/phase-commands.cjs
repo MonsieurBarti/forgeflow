@@ -16,7 +16,7 @@ const path = require('path');
 const os = require('os');
 const {
   bdArgs, bdJsonArgs, output, forgeError, validateId, normalizeChildren,
-  collectMilestoneRequirements, findGitRoot, resolveSettings,
+  unwrapBdArray, collectMilestoneRequirements, findGitRoot, resolveSettings,
 } = require('./core.cjs');
 const { serveAndAwaitDecision } = require('./dev-server.cjs');
 const { esc, COMPONENT_CSS, wrapPage, card, badge, tabs } = require('./design-system.cjs');
@@ -314,8 +314,7 @@ function readAgentContextEntries(phaseId, agentFilter = null) {
 function collectPlanData(phaseId) {
   validateId(phaseId);
 
-  const phaseRaw = bdJsonArgs(['show', phaseId]);
-  const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+  const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
   const children = bdJsonArgs(['children', phaseId]);
   const tasks = normalizeChildren(children);
 
@@ -418,8 +417,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phaseRaw = bdJsonArgs(['show', phaseId]);
-    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -473,7 +471,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -578,7 +576,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -599,7 +597,7 @@ module.exports = {
     for (const dep of blockerDeps) {
       const blockerId = dep.from || dep.source || dep.id;
       if (!blockerId || blockerId === phaseId) continue;
-      const blocker = bdJsonArgs(['show', blockerId]);
+      const blocker = unwrapBdArray(bdJsonArgs(['show', blockerId]));
       if (blocker && blocker.status !== 'closed') {
         openBlockers.push({ id: blockerId, title: blocker.title, status: blocker.status });
       }
@@ -653,7 +651,7 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phase = bdJsonArgs(['show', phaseId]);
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
@@ -755,8 +753,7 @@ module.exports = {
     let checkpoint = null;
 
     try {
-      const phaseRaw = bdJsonArgs(['show', phaseId]);
-      const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+      const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
       const notes = phase?.notes || '';
       const match = notes.match(/forge:checkpoint\s+(\{[\s\S]*\})/);
       if (match) {
@@ -808,15 +805,13 @@ module.exports = {
     }
     validateId(phaseId);
 
-    const phaseRaw = bdJsonArgs(['show', phaseId]);
-    const phase = Array.isArray(phaseRaw) ? phaseRaw[0] : phaseRaw;
+    const phase = unwrapBdArray(bdJsonArgs(['show', phaseId]));
     const children = bdJsonArgs(['children', phaseId]);
     const tasks = normalizeChildren(children);
 
     // TODO(perf): N+1 subprocess -- calls bd show per task. Needs bd CLI batch-query support.
     const enrichedTasks = tasks.map(task => {
-      const raw = bdJsonArgs(['show', task.id]);
-      const full = Array.isArray(raw) ? raw[0] : raw;
+      const full = unwrapBdArray(bdJsonArgs(['show', task.id]));
       return {
         id: task.id,
         title: task.title || full?.title,
@@ -868,7 +863,7 @@ module.exports = {
     validateId(projectId);
     validateId(milestoneId);
 
-    const milestone = bdJsonArgs(['show', milestoneId]);
+    const milestone = unwrapBdArray(bdJsonArgs(['show', milestoneId]));
     if (!milestone || !milestone.id) {
       forgeError('NOT_FOUND', `Milestone '${milestoneId}' not found`, 'Verify the milestone ID with: forge-tools milestone-list <project-id>', { milestoneId });
     }
@@ -988,7 +983,7 @@ module.exports = {
       for (const dep of parentDeps) {
         const ancestorId = dep.id;
         if (!ancestorId) continue;
-        const ancestor = bdJsonArgs(['show', ancestorId]);
+        const ancestor = unwrapBdArray(bdJsonArgs(['show', ancestorId]));
         if (ancestor && (ancestor.labels || []).includes('forge:milestone')) {
           parentId = ancestorId;
           break;
@@ -1543,8 +1538,7 @@ module.exports = {
 
       // Apply grouped design-field edits (single read-modify-write per task)
       for (const [taskId, fields] of designEdits) {
-        const taskRaw = bdJsonArgs(['show', taskId]);
-        const task = Array.isArray(taskRaw) ? taskRaw[0] : taskRaw;
+        const task = unwrapBdArray(bdJsonArgs(['show', taskId]));
         let design = task.design || null;
         if (typeof design === 'string') {
           try { design = JSON.parse(design); } catch { design = {}; }

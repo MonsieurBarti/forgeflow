@@ -116,7 +116,7 @@ Constraints:
 ${FULL_MODE ? '- Each task MUST have specific, testable acceptance criteria' : ''}
 
 For each task:
-  bd create --title='<title>' --description='<what to do>' --acceptance_criteria='<done when>' --type=task --priority=2 --json
+  bd create --title='<title>' --description='<what to do>' --acceptance='<done when>' --type=task --priority=2 --json
   bd dep add <task-id> ${QUICK_ID} --type=parent-child
   bd label add <task-id> forge:task
 ")

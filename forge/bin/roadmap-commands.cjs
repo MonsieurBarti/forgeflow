@@ -9,7 +9,7 @@
  *       context-write, context-read are in phase-commands.cjs.
  */
 
-const { bd, bdJson, output } = require('./core.cjs');
+const { bd, bdJsonArgs, output } = require('./core.cjs');
 
 module.exports = {
   /**
@@ -38,7 +38,7 @@ module.exports = {
     const actions = [];
 
     for (const project of projects) {
-      const childrenData = bdJson(`children ${project.id}`);
+      const childrenData = bdJsonArgs(['children', project.id]);
       const children = Array.isArray(childrenData) ? childrenData : (childrenData?.issues || childrenData?.children || []);
 
       const phases = children.filter(c => (c.labels || []).includes('forge:phase'));
@@ -67,7 +67,7 @@ module.exports = {
 
       let milestone = milestones.find(m => m.status !== 'closed');
       if (!milestone) {
-        const created = bdJson(`create --title="Milestone 1" --description="Default milestone (auto-created by migration)" --type=epic --priority=1`);
+        const created = bdJsonArgs(['create', '--title=Milestone 1', '--description=Default milestone (auto-created by migration)', '--type=epic', '--priority=1']);
         if (!created || !created.id) {
           actions.push({ project: project.id, error: 'Failed to create milestone' });
           continue;
