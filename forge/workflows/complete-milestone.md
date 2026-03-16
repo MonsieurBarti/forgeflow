@@ -184,34 +184,63 @@ Completed: <date>"
 bd close <milestone-id> --reason="Milestone complete. <N> phases, <M/Y> requirements satisfied."
 ```
 
-## 7b. Remove Worktree
+**IMPORTANT: NEVER close the project bead.** The project stays open permanently — it represents the repository itself. Only milestones are closed.
 
-Clean up the milestone worktree now that all phases are merged:
+## 7b. Remove Worktrees
+
+Clean up all worktrees created for phases, quick tasks, and debug tasks under this milestone.
+
+First, get all phase IDs under the milestone:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-remove <milestone-id>
+bd children <milestone-id> --json
 ```
 
-If the worktree no longer exists (already removed or was never created), treat this as success — the cleanup goal is achieved either way.
+Filter to forge:phase beads. For each phase ID, remove its worktree if it exists:
+```bash
+# For each phase
+git worktree remove .forge/worktrees/phase-<phaseId> --force 2>/dev/null || true
+```
 
-**IMPORTANT: NEVER close the project bead.** The project stays open permanently — it represents the repository itself. Only milestones are closed.
+Also remove any quick-task and debug worktrees:
+```bash
+# Remove all quick and debug worktrees
+for wt in .forge/worktrees/quick-* .forge/worktrees/debug-*; do
+  [ -d "$wt" ] && git worktree remove "$wt" --force 2>/dev/null || true
+done
+```
+
+Prune stale worktree references:
+```bash
+git worktree prune
+```
+
+If no worktrees exist (already removed or were never created), treat this as success — the cleanup goal is achieved either way.
 
 ## 7c. Cleanup Preview (dry-run)
 
 Collect what would be cleaned by running each cleanup command in dry-run mode:
 
 ```bash
-BRANCH_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-cleanup-branches <milestone-id> --dry-run)
 BEAD_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-close-beads <milestone-id> --dry-run)
 MEMORY_PREVIEW=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-purge-memories <milestone-id> --dry-run)
 ```
 
-Parse JSON from each. Display a formatted preview:
+Also list the branches that will be deleted:
+```bash
+# Collect branches to delete
+PHASE_BRANCHES=$(git branch --list 'forge/phase-*')
+QUICK_BRANCHES=$(git branch --list 'forge/quick-*')
+DEBUG_BRANCHES=$(git branch --list 'forge/debug-*')
+MILESTONE_BRANCH="forge/milestone-<milestone-id>"
+```
+
+Display a formatted preview:
 
 ```
 ## Cleanup Preview
 
 Branches to delete: <N>
-<list branch names, or "none">
+<list: forge/phase-*, forge/quick-*, forge/debug-*, forge/milestone-<id>>
 
 Beads to close: <N>
 <list id + title, or "none">
@@ -220,7 +249,7 @@ Memories to purge: <N>
 <list key names, or "none">
 ```
 
-**If all three return count: 0:** Skip steps 7d-7e. Note "Cleanup: nothing to do" and proceed to step 8.
+**If nothing to clean:** Skip steps 7d-7e. Note "Cleanup: nothing to do" and proceed to step 7g.
 
 ## 7d. User Confirmation
 
@@ -228,19 +257,39 @@ Use AskUserQuestion (multiSelect: false):
 - header: "Cleanup"
 - question: "Proceed with milestone cleanup?"
 - options:
-  - "Execute all cleanup" — proceed with all three cleanup steps
-  - "Skip cleanup" — skip directly to step 8
+  - "Execute all cleanup" — proceed with all cleanup steps
+  - "Skip cleanup" — skip directly to step 7g
   - "Cancel" — stop the workflow entirely
 
 If "Cancel": stop the workflow.
-If "Skip cleanup": proceed to step 8 with cleanup_skipped = true.
+If "Skip cleanup": proceed to step 7g with cleanup_skipped = true.
 
 ## 7e. Execute Cleanup
 
-Call each command without --dry-run, in order (branches first since worktree was already removed in 7b):
+Delete branches for phases, quick tasks, debug tasks, and the milestone branch:
 
 ```bash
-BRANCH_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-cleanup-branches <milestone-id>)
+# Delete phase branches (local + remote)
+for branch in $(git branch --list 'forge/phase-*' | tr -d ' '); do
+  git branch -D "$branch" 2>/dev/null || true
+  git push origin --delete "$branch" 2>/dev/null || true
+done
+
+# Delete quick-task branches (local + remote)
+for branch in $(git branch --list 'forge/quick-*' | tr -d ' '); do
+  git branch -D "$branch" 2>/dev/null || true
+  git push origin --delete "$branch" 2>/dev/null || true
+done
+
+# Delete debug branches (local + remote)
+for branch in $(git branch --list 'forge/debug-*' | tr -d ' '); do
+  git branch -D "$branch" 2>/dev/null || true
+  git push origin --delete "$branch" 2>/dev/null || true
+done
+```
+
+Close beads and purge memories:
+```bash
 BEAD_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-close-beads <milestone-id>)
 MEMORY_RESULT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" milestone-purge-memories <milestone-id>)
 ```
@@ -253,6 +302,7 @@ Append cleanup results to the step 8 report:
 
 ```
 ## Cleanup Results
+- Worktrees removed: <N>
 - Branches deleted: <N> (failed: <M>)
 - Beads closed: <N> (failed: <M>)
 - Memories purged: <N> (failed: <M>)
@@ -313,6 +363,44 @@ Parse the JSON result. Display the release URL if created.
 
 If release-create fails, report the error but do not block milestone completion.
 
+## 7h. Create PR to Main
+
+Create a pull request from the milestone branch to main, collecting all milestone work:
+
+```bash
+git push origin forge/milestone-<milestone-id>
+
+gh pr create \
+  --base main \
+  --head forge/milestone-<milestone-id> \
+  --title "Milestone: <milestone-name>" \
+  --body "## Summary
+
+Closes milestone <milestone-id>.
+
+### Accomplishments
+<accomplishment list from step 4>
+
+### Requirements Coverage
+<N/M requirements satisfied>
+
+### Phases
+<list of phases with status>"
+```
+
+Display the PR URL to the user.
+
+## 7i. Delete Milestone Branch (after merge)
+
+After the PR is merged (or if the user confirms manual merge), delete the milestone branch:
+
+```bash
+git branch -D forge/milestone-<milestone-id> 2>/dev/null || true
+git push origin --delete forge/milestone-<milestone-id> 2>/dev/null || true
+```
+
+**Note:** If the PR has not been merged yet, skip this step and remind the user to delete the branch after merging.
+
 ## 8. Report and Next Steps
 
 ```
@@ -345,14 +433,16 @@ Next steps:
 - [ ] Requirement coverage checked via validates dependencies
 - [ ] Retrospective generated and stored in milestone bead notes
 - [ ] Milestone epic closed
-- [ ] Worktree removed via worktree-remove
+- [ ] Phase/quick/debug worktrees removed from .forge/worktrees/
 - [ ] Cleanup preview shown (branches, beads, memories)
 - [ ] User confirmed cleanup execution (or skipped)
-- [ ] Cleanup executed (branches deleted, beads closed, memories purged)
+- [ ] Cleanup executed (forge/phase-*, forge/quick-*, forge/debug-* branches deleted, beads closed, memories purged)
 - [ ] Changelog generated from Conventional Commits (CHANGELOG.md)
 - [ ] Version bumped in package.json (auto-detected from CC types)
 - [ ] Release artifacts committed (CHANGELOG.md + package.json)
 - [ ] User asked about GitHub release creation
 - [ ] GitHub release created if confirmed (tag + push + gh release)
+- [ ] PR created from forge/milestone-<id> to main via gh pr create
+- [ ] Milestone branch (forge/milestone-<id>) deleted after PR merge
 - [ ] Next steps presented to user
 </success_criteria>

@@ -52,17 +52,39 @@ module.exports = {
       .filter(Boolean);
 
     // Match branches belonging to this milestone:
-    // - forge/m-<id>-phase-* (newer convention)
-    // - forge/m-<id>/phase-* (older convention)
+    // Legacy patterns:
+    // - forge/m-<id>-phase-* (older convention with milestone prefix)
+    // - forge/m-<id>/phase-* (oldest convention with slash separator)
     // - forge/m-<id> (milestone branch itself)
-    // - forge/quick-* branches linked to milestone phases (skip for now — too broad)
-    const prefix1 = `forge/m-${milestoneId}-phase-`;
-    const prefix2 = `forge/m-${milestoneId}/phase-`;
-    const exact = `forge/m-${milestoneId}`;
+    // New generalized patterns (wave 2):
+    // - forge/phase-* (phase worktree branches)
+    // - forge/quick-* (quick task branches)
+    // - forge/debug-* (debug session branches)
+    const legacyPrefix1 = `forge/m-${milestoneId}-phase-`;
+    const legacyPrefix2 = `forge/m-${milestoneId}/phase-`;
+    const legacyExact = `forge/m-${milestoneId}`;
+    const newPhasePrefix = 'forge/phase-';
+    const newQuickPrefix = 'forge/quick-';
+    const newDebugPrefix = 'forge/debug-';
 
-    const targets = mergedBranches.filter(b =>
-      b.startsWith(prefix1) || b.startsWith(prefix2) || b === exact
-    );
+    // Collect phase IDs under this milestone to scope new-pattern matching
+    const phaseIds = collectPhaseIds(milestoneId);
+    const phaseIdSet = new Set(phaseIds);
+
+    const targets = mergedBranches.filter(b => {
+      // Legacy patterns (always match by milestone ID prefix)
+      if (b.startsWith(legacyPrefix1) || b.startsWith(legacyPrefix2) || b === legacyExact) {
+        return true;
+      }
+      // New generalized patterns: match forge/<prefix>-<phaseId> for known phase IDs
+      for (const pfx of [newPhasePrefix, newQuickPrefix, newDebugPrefix]) {
+        if (b.startsWith(pfx)) {
+          const suffix = b.slice(pfx.length);
+          if (phaseIdSet.has(suffix)) return true;
+        }
+      }
+      return false;
+    });
 
     if (dryRun) {
       return output({ dry_run: true, branches: targets, count: targets.length }, 'milestone-cleanup-branches');
