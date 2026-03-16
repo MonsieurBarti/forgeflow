@@ -43,7 +43,7 @@ module.exports = {
     // Get all local branches merged into current HEAD
     const mergedRaw = git(['branch', '--merged'], { allowFail: true });
     if (!mergedRaw) {
-      return output({ dry_run: dryRun, branches: [], deleted: [], failed: [] });
+      return output({ dry_run: dryRun, branches: [], deleted: [], failed: [], count: 0 }, 'milestone-cleanup-branches');
     }
 
     const mergedBranches = mergedRaw
@@ -65,7 +65,7 @@ module.exports = {
     );
 
     if (dryRun) {
-      return output({ dry_run: true, branches: targets, count: targets.length });
+      return output({ dry_run: true, branches: targets, count: targets.length }, 'milestone-cleanup-branches');
     }
 
     const deleted = [];
@@ -85,7 +85,7 @@ module.exports = {
       }
     }
 
-    output({ dry_run: false, deleted, failed, count: deleted.length });
+    output({ dry_run: false, deleted, failed, count: deleted.length }, 'milestone-cleanup-branches');
   },
 
   /**
@@ -121,7 +121,7 @@ module.exports = {
         status: b.status,
         type: b.issue_type,
       }));
-      return output({ dry_run: true, beads: preview, count: preview.length });
+      return output({ dry_run: true, beads: preview, count: preview.length }, 'milestone-close-beads');
     }
 
     const closed = [];
@@ -142,7 +142,7 @@ module.exports = {
       }
     }
 
-    output({ dry_run: false, closed, failed, count: closed.length });
+    output({ dry_run: false, closed, failed, count: closed.length }, 'milestone-close-beads');
   },
 
   /**
@@ -163,7 +163,7 @@ module.exports = {
     // Get all memories as JSON
     const allMemories = bdJsonArgs(['memories']);
     if (!allMemories || typeof allMemories !== 'object') {
-      return output({ dry_run: dryRun, keys: [], purged: [], failed: [], count: 0 });
+      return output({ dry_run: dryRun, keys: [], purged: [], failed: [], count: 0 }, 'milestone-purge-memories');
     }
 
     // Build target key prefixes/exact matches for efficient O(1) lookups
@@ -198,7 +198,7 @@ module.exports = {
     const targetList = [...targetKeys];
 
     if (dryRun) {
-      return output({ dry_run: true, keys: targetList, count: targetList.length });
+      return output({ dry_run: true, keys: targetList, count: targetList.length }, 'milestone-purge-memories');
     }
 
     const purged = [];
@@ -214,6 +214,6 @@ module.exports = {
       }
     }
 
-    output({ dry_run: false, purged, failed, count: purged.length });
+    output({ dry_run: false, purged, failed, count: purged.length }, 'milestone-purge-memories');
   },
 };

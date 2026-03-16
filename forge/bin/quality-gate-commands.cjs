@@ -89,7 +89,7 @@ module.exports = {
 
     bdArgs(['remember', '--key', key, value]);
 
-    output({ ok: true, hash, key, finding: { agent, category, file, title } });
+    output({ ok: true, hash, key, finding: { agent, category, file, title } }, 'quality-gate-fp-add');
   },
 
   /**
@@ -126,7 +126,7 @@ module.exports = {
       fps.push({ hash, key, agent: finding.agent, category: finding.category, file: finding.file, title: finding.title });
     }
 
-    output({ ok: true, count: fps.length, false_positives: fps });
+    output({ ok: true, count: fps.length, false_positives: fps }, 'quality-gate-fp-list');
   },
 
   /**
@@ -167,7 +167,7 @@ module.exports = {
         cleared++;
       }
 
-      output({ ok: true, cleared, message: `Cleared ${cleared} false-positive(s)` });
+      output({ ok: true, cleared, message: `Cleared ${cleared} false-positive(s)` }, 'quality-gate-fp-clear');
       return;
     }
 
@@ -182,7 +182,7 @@ module.exports = {
     const key = `${FP_KEY_PREFIX}${params.hash}`;
     bdArgs(['forget', key]);
 
-    output({ ok: true, hash: params.hash, key, message: `Cleared false-positive ${params.hash}` });
+    output({ ok: true, hash: params.hash, key, message: `Cleared false-positive ${params.hash}` }, 'quality-gate-fp-clear');
   },
 
   /**
@@ -259,7 +259,7 @@ module.exports = {
       try { fs.unlinkSync(reportPath); } catch { /* INTENTIONALLY SILENT */ }
     }, 15000);
 
-    output({ success: true, report_path: reportPath, findings_count: totalFindings });
+    output({ success: true, report_path: reportPath, findings_count: totalFindings }, 'quality-gate-report');
   },
 
   /**
@@ -335,7 +335,7 @@ module.exports = {
         try { fs.unlinkSync(reportPath); } catch { /* INTENTIONALLY SILENT */ }
       }, 15000);
 
-      output({ fallback: true, report_path: reportPath, findings_count: totalFindings });
+      output({ fallback: true, report_path: reportPath, findings_count: totalFindings }, 'quality-gate-triage');
       return;
     }
 
@@ -665,7 +665,7 @@ async function generateTriageAndServe({ agents, findings, filteredFps, changedFi
     timeout: 1800000, // 30 minutes
   });
 
-  output(decision);
+  output(decision, 'quality-gate-triage');
 }
 
 /**

@@ -40,7 +40,7 @@ module.exports = {
 
     if (fs.existsSync(wtPath)) {
       const hint = 'Worktree already exists at ' + wtPath + '. Use it directly or remove with: forge-tools worktree-remove ' + milestoneId;
-      output({ created: false, path: wtPath, branch, reason: 'already_exists', suggestion: hint });
+      output({ created: false, path: wtPath, branch, reason: 'already_exists', suggestion: hint }, 'worktree-create');
       return;
     }
 
@@ -52,7 +52,7 @@ module.exports = {
     }
 
     git(['worktree', 'add', wtPath, branch]);
-    output({ created: true, path: wtPath, branch });
+    output({ created: true, path: wtPath, branch }, 'worktree-create');
   },
 
   /**
@@ -65,7 +65,7 @@ module.exports = {
     }
     const wtPath = safeWorktreePath(milestoneId);
     const exists = fs.existsSync(wtPath);
-    output({ path: wtPath, exists });
+    output({ path: wtPath, exists }, 'worktree-path');
   },
 
   /**
@@ -79,7 +79,7 @@ module.exports = {
     const wtPath = safeWorktreePath(milestoneId);
 
     if (!fs.existsSync(wtPath)) {
-      output({ removed: false, reason: 'not_found', suggestion: 'Worktree not found. List existing worktrees with: git worktree list' });
+      output({ removed: false, reason: 'not_found', suggestion: 'Worktree not found. List existing worktrees with: git worktree list' }, 'worktree-remove');
       return;
     }
 
@@ -92,7 +92,7 @@ module.exports = {
       }
     } catch { /* INTENTIONALLY SILENT: empty parent dir cleanup is best-effort */ }
 
-    output({ removed: true, path: wtPath });
+    output({ removed: true, path: wtPath }, 'worktree-remove');
   },
 
   /**
@@ -126,13 +126,13 @@ module.exports = {
     if (existing) {
       git(['checkout', branch]);
       const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
-      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint }, 'branch-create');
       return;
     }
 
     git(['branch', branch]);
     git(['checkout', branch]);
-    output({ created: true, branch, phaseId, milestoneId });
+    output({ created: true, branch, phaseId, milestoneId }, 'branch-create');
   },
 
   /**
@@ -144,7 +144,7 @@ module.exports = {
       forgeError('MISSING_ARG', 'Missing required argument: branch', 'Run: forge-tools branch-push <branch-name>');
     }
     git(['push', '-u', 'origin', '--', branch]);
-    output({ pushed: true, branch });
+    output({ pushed: true, branch }, 'branch-push');
   },
 
   /**
@@ -219,7 +219,7 @@ module.exports = {
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
       const hint = 'A PR already exists for this branch. View it at: ' + existing;
-      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint }, 'pr-create');
     }
 
     try {
@@ -230,7 +230,7 @@ module.exports = {
         '--base', base,
         '--head', branch,
       ]);
-      output({ created: true, url: prUrl, branch, base, title });
+      output({ created: true, url: prUrl, branch, base, title }, 'pr-create');
     } catch (err) {
       forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools pr-create <phase-id>', { branch, base });
     }
@@ -251,13 +251,13 @@ module.exports = {
     if (existing) {
       git(['checkout', branch]);
       const hint = 'Branch ' + branch + ' already exists and has been checked out. Push with: forge-tools branch-push ' + branch;
-      output({ created: false, branch, reason: 'already_exists', suggestion: hint });
+      output({ created: false, branch, reason: 'already_exists', suggestion: hint }, 'quick-branch-create');
       return;
     }
 
     git(['branch', branch]);
     git(['checkout', branch]);
-    output({ created: true, branch, quickId });
+    output({ created: true, branch, quickId }, 'quick-branch-create');
   },
 
   /**
@@ -294,7 +294,7 @@ module.exports = {
     const existing = gh(['pr', 'list', '--head', branch, '--json', 'url', '--jq', '.[0].url'], { allowFail: true });
     if (existing) {
       const hint = 'A PR already exists for this branch. View it at: ' + existing;
-      return output({ created: false, url: existing, branch, base, title, suggestion: hint });
+      return output({ created: false, url: existing, branch, base, title, suggestion: hint }, 'quick-pr-create');
     }
 
     try {
@@ -307,7 +307,7 @@ module.exports = {
       ]);
       // Persist PR URL in bead notes so the dashboard can display it
       bdArgs(['update', quickId, `--notes=PR: ${prUrl.trim()}`], { allowFail: true });
-      output({ created: true, url: prUrl, branch, base, title });
+      output({ created: true, url: prUrl, branch, base, title }, 'quick-pr-create');
     } catch (err) {
       forgeError('COMMAND_FAILED', `Failed to create PR: ${err.message}`, 'Verify the branch has been pushed and try again with: forge-tools quick-pr-create <quick-id>', { branch, base });
     }

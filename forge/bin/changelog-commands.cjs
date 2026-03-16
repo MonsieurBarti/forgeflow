@@ -132,7 +132,7 @@ module.exports = {
     // Parse commits
     const commits = parseConventionalCommits(fromTag);
     if (commits.length === 0) {
-      output({ generated: false, reason: 'no_commits', fromTag: fromTag || '(all)', commitCount: 0 });
+      output({ generated: false, reason: 'no_commits', fromTag: fromTag || '(all)', commitCount: 0 }, 'changelog-generate');
       return;
     }
 
@@ -186,7 +186,7 @@ module.exports = {
       sections: sectionNames,
       version,
       fromTag: fromTag || '(all)',
-    });
+    }, 'changelog-generate');
   },
 
   /**
@@ -285,7 +285,7 @@ module.exports = {
       newVersion,
       level,
       autoDetected,
-    });
+    }, 'version-bump');
   },
 
   /**
@@ -322,7 +322,7 @@ module.exports = {
     // Idempotency: check if release already exists
     const existingRelease = gh(['release', 'view', tag, '--json', 'url', '--jq', '.url'], { allowFail: true });
     if (existingRelease) {
-      output({ created: false, tag, version, releaseUrl: existingRelease.trim(), reason: 'already_exists' });
+      output({ created: false, tag, version, releaseUrl: existingRelease.trim(), reason: 'already_exists' }, 'release-create');
       return;
     }
 
@@ -372,7 +372,7 @@ module.exports = {
         forgeError('COMMAND_FAILED', 'gh release create returned no URL', 'Check GitHub CLI auth and try again');
       }
 
-      output({ created: true, tag, version, releaseUrl: releaseUrl.trim() });
+      output({ created: true, tag, version, releaseUrl: releaseUrl.trim() }, 'release-create');
     } finally {
       // Clean up temp file
       try { fs.unlinkSync(notesFile); } catch { /* best-effort */ }

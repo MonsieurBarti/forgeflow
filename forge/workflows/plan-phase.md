@@ -357,16 +357,8 @@ Check for:
 4. Alignment with project-level standards documented in CLAUDE.md
 5. Whether files_affected lists are complete and reasonable for the described work
 
-Output your findings as raw JSON (do NOT wrap in markdown fences):
-{
-  \"agent\": \"forge-architect\",
-  \"findings\": [
-    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
-  ],
-  \"summary\": \"<one-line overall architectural assessment>\"
-}
-
-If all tasks look good, output findings as an empty array with a positive summary.
+Output your findings as raw JSON conforming to agents/schemas/plan-audit.md (do NOT wrap in markdown fences).
+Set agent to "forge-architect". If all tasks look good, output findings as an empty array with a positive summary.
 ")
 ```
 
@@ -389,16 +381,8 @@ Check for:
 3. Sensitive files in files_affected that need extra scrutiny (credentials, configs, auth modules)
 4. Whether the planned approach follows security best practices for the domain
 
-Output your findings as raw JSON (do NOT wrap in markdown fences):
-{
-  \"agent\": \"forge-security-auditor\",
-  \"findings\": [
-    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
-  ],
-  \"summary\": \"<one-line overall security assessment>\"
-}
-
-If all tasks look good, output findings as an empty array with a positive summary.
+Output your findings as raw JSON conforming to agents/schemas/plan-audit.md (do NOT wrap in markdown fences).
+Set agent to "forge-security-auditor". If all tasks look good, output findings as an empty array with a positive summary.
 ")
 ```
 
@@ -421,16 +405,8 @@ Check for:
 3. Scalability concerns given the planned architecture
 4. Whether files_affected suggest high-traffic paths that need performance attention
 
-Output your findings as raw JSON (do NOT wrap in markdown fences):
-{
-  \"agent\": \"forge-performance-auditor\",
-  \"findings\": [
-    { \"task\": \"<task-id>\", \"severity\": \"critical\"|\"high\"|\"medium\"|\"low\"|\"info\", \"title\": \"<short title>\", \"description\": \"<what is wrong>\", \"recommendation\": \"<how to fix>\" }
-  ],
-  \"summary\": \"<one-line overall performance assessment>\"
-}
-
-If all tasks look good, output findings as an empty array with a positive summary.
+Output your findings as raw JSON conforming to agents/schemas/plan-audit.md (do NOT wrap in markdown fences).
+Set agent to "forge-performance-auditor". If all tasks look good, output findings as an empty array with a positive summary.
 ")
 ```
 
@@ -492,15 +468,12 @@ Collect all findings from successful agents into a single list. Each finding ret
 
 Store all findings via context-write on the phase bead:
 
+Build a JSON payload conforming to `agents/schemas/context-write.md` with `agent: "plan-time-gate"`,
+`status: "completed"`, and `findings` containing all findings from successful agents (each with
+`agent`, `task`, `severity`, `title`, `description`, `recommendation` fields).
+
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '{
-  "agent": "plan-time-gate",
-  "status": "completed",
-  "findings": [
-    { "agent": "<source-agent>", "task": "<task-id>", "severity": "<severity>", "title": "<title>", "description": "<description>", "recommendation": "<recommendation>" }
-  ],
-  "summary": "<combined summary from all agents>"
-}'
+node "$HOME/.claude/forge/bin/forge-tools.cjs" context-write <phase-id> '<context-write JSON>'
 ```
 
 If no successful agents produced results, store a minimal context entry noting the gate was
