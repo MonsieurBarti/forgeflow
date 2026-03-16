@@ -555,8 +555,20 @@ const SCHEMAS = {
     suggestion: opt('string',  'Help text'),
   },
 
+  'task-branch-create': {
+    _description: 'Task branch creation result (generalized)',
+    _module: 'git-commands',
+    created:    req('boolean', 'Whether branch was created'),
+    branch:     req('string',  'Branch name'),
+    id:         opt('string',  'Task bead ID'),
+    prefix:     opt('string',  'Branch prefix (phase, quick, debug)'),
+    base:       opt('string',  'Base branch'),
+    reason:     opt('string',  'Why creation was skipped'),
+    suggestion: opt('string',  'Help text'),
+  },
+
   'branch-create': {
-    _description: 'Phase branch creation result',
+    _description: 'Phase branch creation result (legacy)',
     _module: 'git-commands',
     created:     req('boolean', 'Whether branch was created'),
     branch:      req('string',  'Branch name'),
