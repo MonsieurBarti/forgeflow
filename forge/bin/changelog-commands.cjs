@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { git, gh, output, forgeError, findGitRoot } = require('./core.cjs');
 
 // --- CC Type to Keep-a-Changelog section mapping ---
@@ -137,16 +138,14 @@ module.exports = {
 
     // Determine version for the header
     let version = versionFlag ? versionFlag.split('=')[1] : 'Unreleased';
+    const gitRoot = findGitRoot(process.cwd()) || process.cwd();
 
     // If no explicit version, try to read from package.json
     if (!versionFlag) {
-      const gitRoot = findGitRoot(process.cwd());
-      if (gitRoot) {
-        try {
-          const pkg = JSON.parse(fs.readFileSync(path.join(gitRoot, 'package.json'), 'utf8'));
-          if (pkg.version) version = pkg.version;
-        } catch { /* best-effort */ }
-      }
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(gitRoot, 'package.json'), 'utf8'));
+        if (pkg.version) version = pkg.version;
+      } catch { /* best-effort */ }
     }
 
     const date = new Date().toISOString().split('T')[0];
@@ -160,7 +159,6 @@ module.exports = {
     }
 
     // Write/prepend to CHANGELOG.md
-    const gitRoot = findGitRoot(process.cwd()) || process.cwd();
     const changelogPath = path.join(gitRoot, 'CHANGELOG.md');
 
     let content;
@@ -350,14 +348,18 @@ module.exports = {
       : changelog.slice(startIdx).trim();
 
     // Write release body to a temp file (avoids shell arg length limits)
-    const tmpDir = require('os').tmpdir();
-    const notesFile = path.join(tmpDir, `forge-release-${tag}.md`);
+    const notesFile = path.join(os.tmpdir(), `forge-release-${tag}.md`);
     fs.writeFileSync(notesFile, releaseBody);
 
     try {
-      // Create and push tag (never force)
+      // Create and push tag (never force). Clean up local tag on push failure.
       git(['tag', tag]);
-      git(['push', 'origin', tag]);
+      try {
+        git(['push', 'origin', tag]);
+      } catch (pushErr) {
+        git(['tag', '-d', tag], { allowFail: true });
+        throw pushErr;
+      }
 
       // Create release via gh CLI
       const releaseUrl = gh([
@@ -365,6 +367,10 @@ module.exports = {
         '--title', tag,
         '--notes-file', notesFile,
       ]);
+
+      if (!releaseUrl) {
+        forgeError('COMMAND_FAILED', 'gh release create returned no URL', 'Check GitHub CLI auth and try again');
+      }
 
       output({ created: true, tag, version, releaseUrl: releaseUrl.trim() });
     } finally {
