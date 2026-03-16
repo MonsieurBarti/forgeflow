@@ -99,7 +99,7 @@ function detectBuildTest() {
         build_cmds: buildCmds,
         test_cmds: testCmds,
         config_source: 'bd-memory',
-        has_tests: testCmds.length > 0,
+        has_tests: testCmds.length > 0 && hasActualTestFiles(root),
       };
     }
   }
@@ -147,7 +147,7 @@ function detectBuildTest() {
       build_cmds: [],
       test_cmds: testCmds,
       config_source: 'pyproject.toml',
-      has_tests: true,
+      has_tests: hasActualTestFiles(root),
     };
   } catch {
     // INTENTIONALLY SILENT: missing or malformed pyproject.toml, fall through.
