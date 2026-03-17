@@ -25,21 +25,69 @@ CONTEXT=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" phase-context <phase-id
 
 Verify phase is `in_progress` (has been planned). If not planned, suggest `/forge:plan` first.
 
-## 2. Switch to Phase Branch
+## 2. Switch to Phase Worktree
 
-Ensure commits land on the correct phase branch, not main. Use `branch-create` which is
-idempotent — it creates the branch if missing or checks out the existing one:
+Ensure commits land on the correct phase branch inside the phase worktree, not the main
+checkout. Resolve the parent milestone to determine the base branch.
 
+### Resolve milestone branch
+
+Look up the phase's parent milestone by traversing the bead graph:
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" branch-create <phase-id>
+PARENT_DEPS=$(bd dep list <phase-id> --direction=up --type=parent-child --json)
 ```
 
-Verify you are now on the phase branch:
+Parse the JSON result. Find the bead with `forge:milestone` label:
+```bash
+# For each parent dep, check if it has forge:milestone label
+bd show <parent-id> --json
+```
+
+If a milestone parent is found:
+```
+MILESTONE_BRANCH=forge/milestone-<milestone-id>
+```
+
+If no milestone parent is found, fall back to main:
+```
+MILESTONE_BRANCH=main
+```
+
+### Create or reuse worktree
+
+Use `worktree-create-task` which is idempotent -- it creates the worktree and branch if
+missing, or reports the existing worktree path if already set up:
+
+```bash
+node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create-task <phase-id> --prefix=phase --base=$MILESTONE_BRANCH
+```
+
+This creates (or reuses):
+- Worktree at `.forge/worktrees/phase-<phase-id>`
+- Branch `forge/phase-<phase-id>` based on the milestone branch (or main)
+
+### Verify working directory
+
+The executor must work within the worktree, not the main checkout:
+```bash
+WORKTREE_PATH=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-path phase-<phase-id>)
+cd "$WORKTREE_PATH"
+```
+
+Verify the working directory is the worktree path:
+```bash
+CURRENT_DIR=$(pwd)
+```
+
+If `CURRENT_DIR` does not match the expected worktree path, **stop and report the issue**.
+Do NOT proceed with execution outside the phase worktree.
+
+Also verify the branch is correct:
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
 ```
 
-If the branch name does not contain the phase ID, **stop and report the issue**.
+If the branch name does not match `forge/phase-<phase-id>`, **stop and report the issue**.
 Do NOT proceed with execution on the wrong branch.
 
 ## 3. Load Checkpoint

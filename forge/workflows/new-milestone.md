@@ -66,19 +66,22 @@ Save for reference:
 bd remember --key "forge:milestone:<id>:goal" "<one-line goal>"
 ```
 
-## 4b. Create Worktree
+## 4b. Create Milestone Branch
 
-Create a git worktree for this milestone so phase work is isolated:
+Create a git branch for this milestone so phase work is isolated. Phases, quick tasks, and
+debug tasks will each get their own worktree branching off this milestone branch.
+
 ```bash
-node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-create <milestone-id>
+git branch forge/milestone-<milestone-id> main
+git push -u origin forge/milestone-<milestone-id>
 ```
 
-If the worktree already exists (e.g. re-running new-milestone), this command will report the existing path — treat this as success, not an error.
+If the branch already exists (e.g. re-running new-milestone), treat this as success — the
+branch is already in place.
 
-Get the worktree path and store it on the milestone bead:
+Store the branch name on the milestone bead:
 ```bash
-WORKTREE_PATH=$(node "$HOME/.claude/forge/bin/forge-tools.cjs" worktree-path <milestone-id>)
-bd remember --key "forge:milestone:<milestone-id>:worktree" "$WORKTREE_PATH"
+bd remember --key "forge:milestone:<milestone-id>:branch" "forge/milestone-<milestone-id>"
 ```
 
 ## 5. Research Decision (Optional)
@@ -181,6 +184,6 @@ bd remember --key "forge:session:last-milestone" "<milestone-id>"
 - [ ] Roadmapper spawned with phase numbering context
 - [ ] Phases created and wired to milestone and project
 - [ ] User approved requirements and roadmap
-- [ ] Worktree created and path stored via bd remember
+- [ ] Milestone branch created and pushed
 - [ ] Summary shown with next steps
 </success_criteria>
